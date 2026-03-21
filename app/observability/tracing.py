@@ -5,6 +5,8 @@ Provides centralized tracing setup for request tracking, query execution,
 and agent processing across the distributed system.
 """
 
+from __future__ import annotations
+
 import logging
 from typing import Optional
 from contextlib import contextmanager
