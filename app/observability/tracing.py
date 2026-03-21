@@ -197,6 +197,8 @@ class TracingManager:
 
     def add_event(self, name: str, attributes: Optional[dict] = None) -> None:
         """Add event to current span."""
+        if not OTEL_AVAILABLE:
+            return
         span = trace.get_current_span()
         if span.is_recording():
             span.add_event(name, attributes or {})
