@@ -13,7 +13,7 @@ alembic==1.13.0
 
 # AI/ML
 langchain==0.1.0
-langraph==0.0.1
+langgraph==0.1.1
 langsmith==0.0.72
 
 # Observability
