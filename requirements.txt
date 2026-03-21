@@ -8,14 +8,14 @@ pydantic==2.5.0
 pydantic-settings==2.1.0
 
 # Langchain Ecosystem
-langchain==0.1.4
-langchain-openai==0.0.6
-langchain-community==0.0.20
+langchain==0.2.0
+langchain-openai==0.1.7
+langchain-community==0.2.0
 langgraph==0.1.1
-langsmith==0.0.87
+langsmith==0.1.63
 
 # LLM & Tools
-openai==1.10.0
+openai==1.25.0
 tenacity==8.2.3
 
 # Data & Database
