@@ -1,0 +1,35 @@
+# Development Environment Configuration
+environment: development
+debug: true
+log_level: DEBUG
+
+database:
+  url: postgresql://meridian:meridian_dev@localhost:5432/meridian_dev
+  echo: true
+  pool_size: 5
+  max_overflow: 10
+
+api:
+  host: 0.0.0.0
+  port: 8000
+  reload: true
+  cors_origins:
+    - http://localhost:3000
+    - http://localhost:8000
+    - http://127.0.0.1:3000
+
+cache:
+  backend: redis
+  url: redis://localhost:6379/0
+  ttl: 3600
+
+observability:
+  metrics_enabled: true
+  tracing_enabled: false
+  json_logging: false
+  log_file: null
+
+security:
+  secret_key: dev-secret-key-change-in-production
+  algorithm: HS256
+  access_token_expire_minutes: 30

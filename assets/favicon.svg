@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- Outer ring -->
+  <circle cx="32" cy="32" r="30" fill="#eef2ff" stroke="#6366f1" stroke-width="3"/>
+  <!-- Cardinal tick marks -->
+  <line x1="32" y1="5"  x2="32" y2="11" stroke="#6366f1" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="32" y1="53" x2="32" y2="59" stroke="#6366f1" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="5"  y1="32" x2="11" y2="32" stroke="#6366f1" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="53" y1="32" x2="59" y2="32" stroke="#6366f1" stroke-width="2.5" stroke-linecap="round"/>
+  <!-- North needle (indigo) -->
+  <polygon points="32,12 27,34 32,30 37,34" fill="#6366f1"/>
+  <!-- South needle (light) -->
+  <polygon points="32,52 27,30 32,34 37,30" fill="#a5b4fc"/>
+  <!-- Center dot -->
+  <circle cx="32" cy="32" r="3.5" fill="#4338ca"/>
+</svg>

@@ -1,0 +1,29 @@
+# Core Framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# Langchain Ecosystem
+langchain==0.1.4
+langchain-openai==0.0.6
+langchain-community==0.0.10
+langgraph==0.1.1
+
+# LLM & Tools
+openai==1.3.0
+tenacity==8.2.3
+
+# Data & Database
+sqlalchemy==2.0.23
+pandas==2.1.2
+psycopg2-binary==2.9.9
+
+# Configuration & Environment
+python-dotenv==1.0.0
+
+# Observability
+python-json-logger==2.0.7
+
+# UI
+gradio>=4.0.0
