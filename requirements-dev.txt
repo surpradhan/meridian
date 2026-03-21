@@ -1,5 +1,10 @@
-# Development Dependencies for MERIDIAN
--r requirements-prod.txt
+# Development dependencies for MERIDIAN
+# Extends base requirements with testing, tooling, and UI
+
+-r requirements.txt
+
+# UI (development only)
+gradio>=4.0.0
 
 # Testing
 pytest==7.4.3
