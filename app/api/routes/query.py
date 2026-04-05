@@ -9,6 +9,8 @@ from typing import Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from app.query.pagination import Paginator
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/query", tags=["query"])
@@ -27,6 +29,8 @@ class QueryRequest(BaseModel):
     trace: Optional[bool] = Field(
         default=False, description="Include execution trace in response"
     )
+    page: Optional[int] = Field(default=1, ge=1, description="Page number (1-indexed)")
+    page_size: Optional[int] = Field(default=100, ge=1, le=10000, description="Rows per page")
 
     class Config:
         """Example for documentation."""
@@ -53,6 +57,7 @@ class QueryResponse(BaseModel):
     error: Optional[str] = Field(default=None, description="Error message if failed")
     state: str = Field(description="Execution state (complete, error)")
     trace: Optional[Any] = Field(default=None, description="Execution trace if requested")
+    pagination: Optional[Dict[str, Any]] = Field(default=None, description="Pagination metadata")
 
     class Config:
         """Allow extra fields from orchestrator and provide schema example."""
@@ -142,6 +147,16 @@ async def execute_query(request: QueryRequest) -> Dict[str, Any]:
             f"Query executed successfully. Domain: {result.get('domain')}, "
             f"Rows: {result.get('row_count', 0)}, Confidence: {result.get('confidence', 0)}"
         )
+
+        # Apply pagination to result rows.
+        # row_count preserves the total from the DB; page_row_count is rows on this page.
+        rows = result.get("result") or []
+        if isinstance(rows, list):
+            paginator = Paginator()
+            paginated = paginator.paginate(rows, page=request.page or 1, page_size=request.page_size or 100)
+            result["result"] = paginated.rows
+            result["page_row_count"] = len(paginated.rows)
+            result["pagination"] = paginated.to_dict()["pagination"]
 
         return result
 

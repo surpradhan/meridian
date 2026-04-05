@@ -17,6 +17,31 @@ try:
 except ImportError:
     redis = None
 
+try:
+    from tenacity import (
+        retry,
+        stop_after_attempt,
+        wait_exponential,
+        retry_if_exception_type,
+    )
+    TENACITY_AVAILABLE = True
+except ImportError:
+    TENACITY_AVAILABLE = False
+
+    def retry(*args, **kwargs):  # type: ignore[misc]
+        def decorator(func):
+            return func
+        return decorator
+
+    def stop_after_attempt(n):  # type: ignore[misc]
+        return None
+
+    def wait_exponential(**kwargs):  # type: ignore[misc]
+        return None
+
+    def retry_if_exception_type(exc):  # type: ignore[misc]
+        return None
+
 logger = logging.getLogger(__name__)
 
 
@@ -168,6 +193,58 @@ class CacheManager:
 
         except Exception as e:
             logger.error(f"Cache set failed: {e}")
+            return False
+
+    def get_result(self, query: str) -> Optional[Dict]:
+        """Get a single cached orchestrator result dict.
+
+        Args:
+            query: Natural language query string
+
+        Returns:
+            Cached result dict or None if not found
+        """
+        if not self.client:
+            self.stats["misses"] += 1
+            return None
+
+        try:
+            key = self._make_key(f"result:{query}")
+            cached = self.client.get(key)
+            if cached:
+                self.stats["hits"] += 1
+                logger.debug(f"Cache hit for result key: {key}")
+                return json.loads(cached)
+            self.stats["misses"] += 1
+            return None
+        except Exception as e:
+            logger.error(f"Cache get_result failed: {e}")
+            self.stats["misses"] += 1
+            return None
+
+    def set_result(self, query: str, result: Dict, ttl_seconds: Optional[int] = None) -> bool:
+        """Cache a single orchestrator result dict.
+
+        Args:
+            query: Natural language query string
+            result: Orchestrator result dict
+            ttl_seconds: Time-to-live in seconds (uses config default if None)
+
+        Returns:
+            True if successfully cached
+        """
+        if not self.client:
+            return False
+
+        try:
+            key = self._make_key(f"result:{query}")
+            ttl = ttl_seconds or self.config.ttl_seconds
+            self.client.setex(key, ttl, json.dumps(result))
+            self.stats["sets"] += 1
+            logger.debug(f"Cached result for key: {key} (TTL: {ttl}s)")
+            return True
+        except Exception as e:
+            logger.error(f"Cache set_result failed: {e}")
             return False
 
     def invalidate(self, pattern: str = "*") -> int:

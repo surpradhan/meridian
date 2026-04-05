@@ -8,6 +8,7 @@ Implements a state machine using Langraph for managing query processing across d
 import logging
 from typing import Dict, Any, List, Tuple
 from enum import Enum
+from urllib.parse import urlparse
 
 from app.views.registry import ViewRegistry
 from app.database.connection import DbConnection
@@ -17,6 +18,7 @@ from app.agents.router import RouterAgent
 from app.agents.domain.sales import SalesAgent
 from app.agents.domain.finance import FinanceAgent
 from app.agents.domain.operations import OperationsAgent
+from app.cache.manager import CacheManager, CacheConfig
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +73,39 @@ class Orchestrator:
             "operations": OperationsAgent(registry, db, self.builder),
         }
 
+        # Initialize cache (singleton — one Redis connection for the process)
+        self.cache = self._get_cache()
+
         logger.debug("Orchestrator initialized")
+
+    @staticmethod
+    def _get_cache() -> CacheManager:
+        """Get or initialize the process-wide CacheManager singleton."""
+        try:
+            from app.config import settings
+            cache_enabled = settings.cache_enabled
+            redis_url = settings.redis_url
+        except Exception:
+            cache_enabled = False
+            redis_url = ""
+
+        # get_instance only creates a new instance on the very first call;
+        # subsequent calls return the existing one regardless of config arg.
+        if CacheManager._instance is None:
+            if cache_enabled and redis_url:
+                parsed = urlparse(redis_url)
+                db_index = int(parsed.path.lstrip("/") or "0")
+                cache_config = CacheConfig(
+                    host=parsed.hostname or "localhost",
+                    port=parsed.port or 6379,
+                    db=db_index,
+                    enabled=True,
+                )
+            else:
+                cache_config = CacheConfig(enabled=cache_enabled)
+            CacheManager.get_instance(cache_config)
+
+        return CacheManager.get_instance()
 
     def process_query(self, query: str) -> Dict[str, Any]:
         """
@@ -85,6 +119,13 @@ class Orchestrator:
         """
         logger.info(f"Processing query: {query}")
 
+        # Check cache before running full pipeline
+        cached = self.cache.get_result(query)
+        if cached is not None:
+            logger.info(f"Cache hit for query: {query!r}")
+            cached["cache_hit"] = True
+            return cached
+
         # Step 1: Route query to appropriate domain
         domain, routing_confidence = self.router.route(query)
         logger.debug(f"Routed to {domain} with confidence {routing_confidence:.2f}")
@@ -97,6 +138,7 @@ class Orchestrator:
                 "query": query,
                 "state": QueryState.ERROR.value,
                 "confidence": 0.0,
+                "cache_hit": False,
             }
 
         # Step 3: Process with domain agent
@@ -107,11 +149,16 @@ class Orchestrator:
             result["domain"] = domain
             result["routing_confidence"] = routing_confidence
             result["state"] = QueryState.COMPLETE.value
+            result["cache_hit"] = False
 
             logger.info(
                 f"Query completed for domain {domain}. "
                 f"Rows: {result.get('row_count', 0)}, Confidence: {result.get('confidence', 0)}"
             )
+
+            # Cache successful results
+            if "error" not in result:
+                self.cache.set_result(query, result)
 
             return result
 
@@ -124,6 +171,7 @@ class Orchestrator:
                 "routing_confidence": routing_confidence,
                 "state": QueryState.ERROR.value,
                 "confidence": 0.0,
+                "cache_hit": False,
             }
 
     def validate_query_for_domain(self, domain: str, query: str) -> Tuple[bool, List[str]]:

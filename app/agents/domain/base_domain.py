@@ -13,6 +13,31 @@ from app.views.registry import ViewRegistry
 from app.query.builder import QueryBuilder
 from app.database.connection import DbConnection
 
+try:
+    from tenacity import (
+        retry,
+        stop_after_attempt,
+        wait_exponential,
+        retry_if_exception_type,
+    )
+    TENACITY_AVAILABLE = True
+except ImportError:
+    TENACITY_AVAILABLE = False
+
+    def retry(*args, **kwargs):  # type: ignore[misc]
+        def decorator(func):
+            return func
+        return decorator
+
+    def stop_after_attempt(n):  # type: ignore[misc]
+        return None
+
+    def wait_exponential(**kwargs):  # type: ignore[misc]
+        return None
+
+    def retry_if_exception_type(exc):  # type: ignore[misc]
+        return None
+
 logger = logging.getLogger(__name__)
 
 
@@ -134,6 +159,14 @@ class BaseDomainAgent(ABC):
 
         return relevant_views
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
+        # Only retry transient runtime errors (e.g. DB connection drops).
+        # ValueError means bad query input — retrying won't help and adds latency.
+        retry=retry_if_exception_type(RuntimeError),
+        reraise=True,
+    )
     def execute_query_request(self, request: QueryRequest) -> Dict[str, Any]:
         """
         Execute a QueryRequest and return results.
