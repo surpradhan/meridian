@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     log_level: str = Field(default="INFO", description="Logging level")
 
     # OpenAI
-    openai_api_key: str = Field(..., description="OpenAI API key")
+    openai_api_key: str = Field(default="", description="OpenAI API key")
     openai_model: str = Field(default="gpt-4", description="OpenAI model to use")
 
     # Langsmith (Optional)
