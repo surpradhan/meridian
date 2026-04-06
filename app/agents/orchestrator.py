@@ -2,11 +2,13 @@
 Multi-Agent Orchestrator
 
 Coordinates the workflow between router, domain agents, validators, and query builder.
-Implements a state machine using Langraph for managing query processing across domains.
+Phase 4: conversation context, query history, smart suggestions, LangGraph primary.
 """
 
 import logging
-from typing import Dict, Any, List, Tuple
+import re as _re
+import json as _json
+from typing import Dict, Any, List, Optional, Tuple
 from enum import Enum
 from urllib.parse import urlparse
 
@@ -19,16 +21,16 @@ from app.agents.domain.sales import SalesAgent
 from app.agents.domain.finance import FinanceAgent
 from app.agents.domain.operations import OperationsAgent
 from app.cache.manager import CacheManager, CacheConfig
+from app.agents.conversation_context import ConversationManager, get_conversation_manager
 
 logger = logging.getLogger(__name__)
 
-# Routing confidence below this threshold triggers a clarification request
-# instead of guessing — avoids confidently wrong answers.
 CLARIFICATION_THRESHOLD = 0.4
+# Expire stale in-memory conversations every N queries (avoids unbounded growth)
+_CLEANUP_INTERVAL = 100
 
 
 class QueryState(str, Enum):
-    """States in query processing workflow."""
     INITIAL = "initial"
     ROUTING = "routing"
     VALIDATION = "validation"
@@ -41,50 +43,39 @@ class Orchestrator:
     """
     Orchestrates multi-agent workflow for processing natural language queries.
 
-    Workflow:
-    1. Route query to appropriate domain agent (sales, finance, operations)
-    2. Domain agent identifies views, filters, aggregations
-    3. QueryValidator validates the query structure
-    4. QueryBuilder generates SQL
-    5. QueryExecutor runs the query
-    6. Return results
-
-    This implementation uses a state machine pattern to manage the workflow.
+    Phase 4 features wired here:
+    - Conversation context threading (multi-turn refinement)
+    - Query history persistence (SQLite)
+    - Smart follow-up suggestions (LLM-generated with static fallback)
+    - LangGraph as primary execution engine (with transparent fallback)
     """
 
-    def __init__(
-        self,
-        registry: ViewRegistry,
-        db: DbConnection,
-    ):
-        """
-        Initialize the orchestrator.
-
-        Args:
-            registry: ViewRegistry instance
-            db: Database connection instance
-        """
+    def __init__(self, registry: ViewRegistry, db: DbConnection):
         self.registry = registry
         self.db = db
         self.builder = QueryBuilder(registry)
         self.validator = QueryValidator(registry)
         self.router = RouterAgent(registry)
 
-        # Initialize domain agents
         self.domain_agents = {
             "sales": SalesAgent(registry, db, self.builder),
             "finance": FinanceAgent(registry, db, self.builder),
             "operations": OperationsAgent(registry, db, self.builder),
         }
 
-        # Initialize cache (singleton — one Redis connection for the process)
         self.cache = self._get_cache()
+        self.conversations: ConversationManager = get_conversation_manager()
+        self._langraph = self._init_langraph(registry, db)
+        self._query_count = 0
 
         logger.debug("Orchestrator initialized")
 
+    # ------------------------------------------------------------------
+    # Init helpers
+    # ------------------------------------------------------------------
+
     @staticmethod
     def _get_cache() -> CacheManager:
-        """Get or initialize the process-wide CacheManager singleton."""
         try:
             from app.config import settings
             cache_enabled = settings.cache_enabled
@@ -93,8 +84,6 @@ class Orchestrator:
             cache_enabled = False
             redis_url = ""
 
-        # get_instance only creates a new instance on the very first call;
-        # subsequent calls return the existing one regardless of config arg.
         if CacheManager._instance is None:
             if cache_enabled and redis_url:
                 parsed = urlparse(redis_url)
@@ -111,52 +100,143 @@ class Orchestrator:
 
         return CacheManager.get_instance()
 
-    def process_query(self, query: str) -> Dict[str, Any]:
+    @staticmethod
+    def _init_langraph(registry: ViewRegistry, db: DbConnection):
+        """Initialize LangGraph orchestrator when the library is available."""
+        try:
+            from app.agents.langraph_orchestrator import LangraphOrchestrator, LANGRAPH_AVAILABLE
+            if LANGRAPH_AVAILABLE:
+                lg = LangraphOrchestrator(registry, db)
+                if lg.graph is not None:
+                    logger.info(
+                        "LangGraph orchestrator available — promoted to primary execution engine"
+                    )
+                    return lg
+        except Exception as e:
+            logger.debug(f"LangGraph init skipped: {e}")
+        return None
+
+    # ------------------------------------------------------------------
+    # Conversation context helpers
+    # ------------------------------------------------------------------
+
+    def _resolve_context(
+        self, conversation_id: Optional[str]
+    ) -> Tuple[Any, Optional[str], str]:
+        """Get-or-create conversation context.
+
+        Returns:
+            (ctx, context_summary, resolved_conversation_id)
+        """
+        if conversation_id:
+            ctx = self.conversations.get_conversation(conversation_id)
+            if ctx:
+                summary = ctx.get_context_summary()
+                return ctx, summary, conversation_id
+            # Expired or unknown — start fresh, log clearly
+            logger.debug(
+                f"Conversation {conversation_id!r} not found or expired; creating new one"
+            )
+
+        ctx = self.conversations.create_conversation()
+        return ctx, None, ctx.conversation_id
+
+    def _maybe_cleanup(self) -> None:
+        """Periodically purge expired in-memory conversations (every N queries)."""
+        self._query_count += 1
+        if self._query_count % _CLEANUP_INTERVAL == 0:
+            removed = self.conversations.cleanup_expired()
+            if removed:
+                logger.debug(f"Periodic cleanup removed {removed} expired conversations")
+
+    # ------------------------------------------------------------------
+    # Core query processing
+    # ------------------------------------------------------------------
+
+    def process_query(
+        self,
+        query: str,
+        conversation_id: Optional[str] = None,
+        forced_domain: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         Process a natural language query through the multi-agent workflow.
 
         Args:
             query: Natural language query
+            conversation_id: Optional session ID for multi-turn context.
+                             A new session is created when omitted or unknown.
+            forced_domain: Skip routing and use this domain directly.
+                           Used by the UI's manual domain selector.
 
         Returns:
-            Dict with results, confidence, domain, and execution details
+            Dict with results, conversation_id, suggestions, and metadata.
         """
-        logger.info(f"Processing query: {query}")
+        logger.info(f"Processing query: {query!r}")
+        self._maybe_cleanup()
 
-        # Check cache before running full pipeline
-        cached = self.cache.get_result(query)
+        ctx, context_summary, conversation_id = self._resolve_context(conversation_id)
+        ctx.add_user_message(query)
+
+        # Cache key is context-scoped when a prior context exists so refined
+        # queries don't collide with stateless cache entries for the same text.
+        cache_key = f"{conversation_id}::{query}" if context_summary else query
+        cached = self.cache.get_result(cache_key)
         if cached is not None:
             logger.info(f"Cache hit for query: {query!r}")
+            cached = dict(cached)  # don't mutate the cached copy
             cached["cache_hit"] = True
+            cached["conversation_id"] = conversation_id
+            # Keep conversation state consistent even on cache hits
+            ctx.add_assistant_message(
+                f"(cached) {cached.get('row_count', 0)} rows from {cached.get('domain', '')}",
+                query_result={
+                    "domain": cached.get("domain"),
+                    "views": cached.get("views", []),
+                    "row_count": cached.get("row_count", 0),
+                },
+            )
+            ctx.update_context(
+                domain=cached.get("domain"),
+                views=cached.get("views", []),
+                result_count=cached.get("row_count", 0),
+            )
             return cached
 
-        # Step 1: Route query to appropriate domain
-        domain, routing_confidence = self.router.route(query)
-        logger.debug(f"Routed to {domain} with confidence {routing_confidence:.2f}")
+        # Routing (or use forced domain)
+        if forced_domain and forced_domain in self.domain_agents:
+            domain = forced_domain
+            routing_confidence = 1.0
+            logger.debug(f"Using forced domain: {domain}")
+        else:
+            domain, routing_confidence = self.router.route(query)
+            logger.debug(f"Routed to {domain} with confidence {routing_confidence:.2f}")
 
-        # Step 1b: Check if confidence is too low to proceed reliably
+        # Clarification gate
         if routing_confidence < CLARIFICATION_THRESHOLD:
             logger.info(
                 f"Low routing confidence ({routing_confidence:.2f}) — requesting clarification"
             )
+            msg = (
+                f"I'm not sure which business area your question relates to "
+                f"(confidence: {routing_confidence:.0%}). "
+                f"Could you add more context? For example, mention whether you're "
+                f"asking about sales/customers, finance/accounting, or "
+                f"inventory/warehouses/shipments."
+            )
+            ctx.add_assistant_message(msg)
             return {
                 "needs_clarification": True,
-                "clarification_message": (
-                    f"I'm not sure which business area your question relates to "
-                    f"(confidence: {routing_confidence:.0%}). "
-                    f"Could you add more context? For example, mention whether you're "
-                    f"asking about sales/customers, finance/accounting, or "
-                    f"inventory/warehouses/shipments."
-                ),
+                "clarification_message": msg,
                 "suggested_domains": list(self.domain_agents.keys()),
                 "domain": domain,
                 "routing_confidence": routing_confidence,
                 "state": QueryState.COMPLETE.value,
                 "confidence": routing_confidence,
                 "cache_hit": False,
+                "conversation_id": conversation_id,
             }
 
-        # Step 2: Get appropriate domain agent
         agent = self.domain_agents.get(domain)
         if not agent:
             return {
@@ -165,26 +245,44 @@ class Orchestrator:
                 "state": QueryState.ERROR.value,
                 "confidence": 0.0,
                 "cache_hit": False,
+                "conversation_id": conversation_id,
             }
 
-        # Step 3: Process with domain agent
         try:
-            result = agent.process_query(query)
+            result = self._execute_with_agent(agent, query, domain, context_summary)
 
-            # Add orchestrator metadata
             result["domain"] = domain
             result["routing_confidence"] = routing_confidence
             result["state"] = QueryState.COMPLETE.value
             result["cache_hit"] = False
+            result["conversation_id"] = conversation_id
+            result["suggestions"] = self._generate_suggestions(query, domain, result)
 
             logger.info(
-                f"Query completed for domain {domain}. "
-                f"Rows: {result.get('row_count', 0)}, Confidence: {result.get('confidence', 0)}"
+                f"Query completed — domain={domain}, "
+                f"rows={result.get('row_count', 0)}, "
+                f"confidence={result.get('confidence', 0)}"
             )
 
-            # Cache successful results
-            if "error" not in result:
-                self.cache.set_result(query, result)
+            ctx.add_assistant_message(
+                f"Returned {result.get('row_count', 0)} rows from {domain}",
+                query_result={
+                    "domain": domain,
+                    "views": result.get("views", []),
+                    "row_count": result.get("row_count", 0),
+                },
+            )
+            ctx.update_context(
+                domain=domain,
+                views=result.get("views", []),
+                result_count=result.get("row_count", 0),
+            )
+
+            self._save_history(query, result, conversation_id)
+
+            # Only cache stateless (context-free) results to avoid cross-session hits
+            if "error" not in result and not context_summary:
+                self.cache.set_result(cache_key, result)
 
             return result
 
@@ -198,50 +296,231 @@ class Orchestrator:
                 "state": QueryState.ERROR.value,
                 "confidence": 0.0,
                 "cache_hit": False,
+                "conversation_id": conversation_id,
             }
 
+    def _execute_with_agent(
+        self,
+        agent,
+        query: str,
+        domain: str,
+        context_summary: Optional[str],
+    ) -> Dict[str, Any]:
+        """
+        Execute query through the LangGraph state machine when available,
+        falling back to a direct agent call.
+
+        The domain is pre-set in the initial state so LangGraph's route node
+        skips re-routing (it honours a pre-set domain — see langraph_orchestrator).
+        """
+        if self._langraph is not None and self._langraph.graph is not None:
+            try:
+                initial_state = {
+                    "query": query,
+                    "domain": domain,          # pre-routed; LangGraph will not re-route
+                    "state": QueryState.INITIAL.value,
+                    "context_summary": context_summary,
+                }
+                final_state = self._langraph.graph.invoke(initial_state)
+                if "error" not in final_state:
+                    return {k: v for k, v in final_state.items() if not k.startswith("_")}
+                logger.debug(
+                    f"LangGraph returned error state ({final_state.get('error')}), "
+                    "falling back to direct agent call"
+                )
+            except Exception as lg_err:
+                logger.debug(f"LangGraph execution raised {lg_err!r}, using direct call")
+
+        return agent.process_query(query, context_summary)
+
+    # ------------------------------------------------------------------
+    # Suggestions (Phase 4.3)
+    # ------------------------------------------------------------------
+
+    def _generate_suggestions(
+        self,
+        query: str,
+        domain: str,
+        result: Dict[str, Any],
+    ) -> List[str]:
+        """
+        Generate 3 follow-up query suggestions via LLM, with a static fallback.
+
+        Inputs are length-capped before interpolation to prevent prompt bloat
+        and reduce the surface area for adversarial content in view/domain names.
+        """
+        from app.agents.llm_client import get_llm
+
+        llm = get_llm()
+        if llm is not None:
+            try:
+                safe_query = str(query)[:300]
+                safe_domain = str(domain)[:30]
+                safe_views = [str(v)[:50] for v in (result.get("views") or [])[:5]]
+                row_count = int(result.get("row_count") or 0)
+
+                prompt = (
+                    f'The user just asked: "{safe_query}"\n'
+                    f"Domain: {safe_domain}, views: {safe_views}, rows returned: {row_count}.\n\n"
+                    "Suggest exactly 3 short, specific follow-up questions a business user might "
+                    "ask next. Return ONLY a JSON array of 3 strings, no other text.\n"
+                    'Example: ["What is the total by region?", "Show me the top 5 customers", '
+                    '"How does this compare to last month?"]'
+                )
+                response = llm.invoke(prompt)
+                content = response.content if hasattr(response, "content") else str(response)
+
+                match = _re.search(r"\[.*?\]", content, _re.DOTALL)
+                if match:
+                    suggestions = _json.loads(match.group())
+                    if isinstance(suggestions, list) and suggestions:
+                        return [str(s) for s in suggestions[:3]]
+            except Exception as e:
+                logger.debug(f"LLM suggestion generation failed: {e}")
+
+        fallbacks: Dict[str, List[str]] = {
+            "sales": [
+                "What is the total sales amount by region?",
+                "Who are the top 5 customers by revenue?",
+                "How do sales compare across product categories?",
+            ],
+            "finance": [
+                "What are the total debits vs credits by account?",
+                "Show me all transactions for a specific account",
+                "What is the net balance across all accounts?",
+            ],
+            "operations": [
+                "Which warehouse has the highest inventory?",
+                "Show me recent shipments by destination",
+                "What products have the lowest stock levels?",
+            ],
+        }
+        return fallbacks.get(domain, [])
+
+    # ------------------------------------------------------------------
+    # History (Phase 4.2)
+    # ------------------------------------------------------------------
+
+    def _save_history(
+        self,
+        query: str,
+        result: Dict[str, Any],
+        conversation_id: Optional[str],
+    ) -> None:
+        """Persist query to history — swallow exceptions, this is non-critical."""
+        try:
+            from app.history.manager import get_history_manager
+            get_history_manager().save(query, result, conversation_id)
+        except Exception as e:
+            logger.debug(f"History save failed (non-critical): {e}")
+
+    # ------------------------------------------------------------------
+    # Conversation management helpers
+    # ------------------------------------------------------------------
+
+    def get_conversation(self, conversation_id: str):
+        """Get a conversation context by ID."""
+        return self.conversations.get_conversation(conversation_id)
+
+    def new_conversation(self) -> str:
+        """Create a new conversation and return its ID."""
+        return self.conversations.create_conversation().conversation_id
+
+    # ------------------------------------------------------------------
+    # Trace variant — delegates to process_query, reconstructs trace shape
+    # ------------------------------------------------------------------
+
+    def process_query_with_trace(
+        self,
+        query: str,
+        conversation_id: Optional[str] = None,
+        forced_domain: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Process query and return a detailed execution trace alongside results.
+
+        Delegates all logic to ``process_query`` so there is a single code
+        path — the trace is assembled from the result dict.
+        """
+        result = self.process_query(
+            query,
+            conversation_id=conversation_id,
+            forced_domain=forced_domain,
+        )
+
+        # Clarification responses are forwarded with minimal trace wrapping
+        if result.get("needs_clarification"):
+            return {
+                **result,
+                "query": query,
+                "steps": [
+                    {
+                        "step": "routing",
+                        "domain": result.get("domain"),
+                        "confidence": result.get("routing_confidence"),
+                    }
+                ],
+            }
+
+        if "error" in result:
+            return {
+                **result,
+                "query": query,
+                "steps": [],
+            }
+
+        trace = {
+            "query": query,
+            "conversation_id": result.get("conversation_id"),
+            "domain": result.get("domain"),
+            "state": result.get("state"),
+            "result": result,
+            "steps": [
+                {
+                    "step": "routing",
+                    "domain": result.get("domain"),
+                    "confidence": result.get("routing_confidence"),
+                },
+                {
+                    "step": "agent_processing",
+                    "domain": result.get("domain"),
+                    "views": result.get("views", []),
+                    "interpretation_method": result.get("interpretation_method"),
+                },
+                {
+                    "step": "validation",
+                    "status": "passed",
+                    "errors": [],
+                },
+                {
+                    "step": "execution",
+                    "row_count": result.get("row_count", 0),
+                    "confidence": result.get("confidence", 0),
+                },
+            ],
+        }
+        return trace
+
+    # ------------------------------------------------------------------
+    # Existing helpers (unchanged)
+    # ------------------------------------------------------------------
+
     def validate_query_for_domain(self, domain: str, query: str) -> Tuple[bool, List[str]]:
-        """
-        Validate a query for a specific domain.
-
-        Args:
-            domain: Domain name (sales, finance, operations)
-            query: Natural language query
-
-        Returns:
-            Tuple of (is_valid, error_messages)
-        """
         agent = self.domain_agents.get(domain)
         if not agent:
             return False, [f"Unknown domain: {domain}"]
-
         try:
-            # Let agent interpret the query
             result = agent.process_query(query)
-
-            # Check if error occurred
             if "error" in result:
                 return False, [result["error"]]
-
             return True, []
-
         except Exception as e:
             return False, [str(e)]
 
     def get_domain_capabilities(self, domain: str) -> Dict[str, Any]:
-        """
-        Get what a domain agent can do.
-
-        Args:
-            domain: Domain name
-
-        Returns:
-            Dict with domain capabilities
-        """
         agent = self.domain_agents.get(domain)
         if not agent:
             return {"error": f"Unknown domain: {domain}"}
-
         return {
             "domain": domain,
             "available_views": agent.get_available_views(),
@@ -250,106 +529,9 @@ class Orchestrator:
         }
 
     def get_all_domains(self) -> List[Dict[str, Any]]:
-        """
-        Get information about all supported domains.
-
-        Returns:
-            List of domain information dicts
-        """
         domains = []
         for domain in ["sales", "finance", "operations"]:
             info = self.router.get_domain_info(domain)
             if info:
                 domains.append(info)
         return domains
-
-    def process_query_with_trace(self, query: str) -> Dict[str, Any]:
-        """
-        Process query and return detailed execution trace.
-
-        Includes intermediate steps for debugging and understanding.
-
-        Args:
-            query: Natural language query
-
-        Returns:
-            Dict with result and execution trace
-        """
-        trace = {
-            "query": query,
-            "steps": [],
-        }
-
-        # Step 1: Routing
-        logger.debug("Step 1: Routing query")
-        domain, confidence = self.router.route(query)
-        trace["steps"].append({
-            "step": "routing",
-            "domain": domain,
-            "confidence": confidence,
-        })
-
-        # Step 1b: Clarification check (same threshold as process_query)
-        if confidence < CLARIFICATION_THRESHOLD:
-            logger.info(
-                f"Low routing confidence ({confidence:.2f}) — requesting clarification (trace mode)"
-            )
-            trace["needs_clarification"] = True
-            trace["clarification_message"] = (
-                f"I'm not sure which business area your question relates to "
-                f"(confidence: {confidence:.0%}). "
-                f"Could you add more context? For example, mention whether you're "
-                f"asking about sales/customers, finance/accounting, or "
-                f"inventory/warehouses/shipments."
-            )
-            trace["suggested_domains"] = list(self.domain_agents.keys())
-            trace["domain"] = domain
-            trace["routing_confidence"] = confidence
-            trace["state"] = QueryState.COMPLETE.value
-            return trace
-
-        # Step 2: Domain agent processing
-        logger.debug(f"Step 2: Processing with {domain} agent")
-        agent = self.domain_agents.get(domain)
-        if not agent:
-            trace["error"] = f"Unknown domain: {domain}"
-            trace["state"] = QueryState.ERROR.value
-            return trace
-
-        try:
-            result = agent.process_query(query)
-            trace["steps"].append({
-                "step": "agent_processing",
-                "domain": domain,
-                "views": result.get("views", []),
-                "filters": result.get("filters", {}),
-                "aggregations": result.get("aggregations", {}),
-            })
-
-            # Step 3: Validation
-            logger.debug("Step 3: Validation")
-            trace["steps"].append({
-                "step": "validation",
-                "status": "passed" if not result.get("error") else "failed",
-                "errors": result.get("error") if isinstance(result.get("error"), list) else [],
-            })
-
-            # Step 4: Execution
-            logger.debug("Step 4: Execution")
-            trace["steps"].append({
-                "step": "execution",
-                "row_count": result.get("row_count", 0),
-                "confidence": result.get("confidence", 0),
-            })
-
-            trace["result"] = result
-            trace["state"] = QueryState.COMPLETE.value
-            trace["domain"] = domain
-
-            return trace
-
-        except Exception as e:
-            logger.error(f"Query processing failed: {e}")
-            trace["error"] = str(e)
-            trace["state"] = QueryState.ERROR.value
-            return trace

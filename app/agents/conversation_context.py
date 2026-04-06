@@ -6,7 +6,7 @@ allowing follow-up queries to reference previous results and context.
 """
 
 import logging
-import json
+import threading
 import uuid
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
@@ -144,38 +144,33 @@ class ConversationContext:
         ]
 
     def get_context_summary(self) -> str:
-        """Get natural language summary of conversation context.
+        """Get natural language summary of conversation context for LLM prompts.
+
+        Includes the actual text of recent user queries so the LLM can resolve
+        pronoun references like "the same", "that region", or "just the West".
 
         Returns:
-            Context summary for LLM prompt
+            Pipe-separated context string, or "No previous context." if empty.
         """
         if not self.messages:
             return "No previous context."
 
         summary_parts = []
 
-        # Domain context
+        # Structured metadata
         if self.context["last_domain"]:
-            summary_parts.append(
-                f"Last domain queried: {self.context['last_domain']}"
-            )
-
-        # Views context
+            summary_parts.append(f"Domain: {self.context['last_domain']}")
         if self.context["last_views"]:
-            summary_parts.append(
-                f"Recent views: {', '.join(self.context['last_views'])}"
-            )
-
-        # Result context
+            summary_parts.append(f"Views: {', '.join(self.context['last_views'])}")
         if self.context["last_result_count"]:
-            summary_parts.append(
-                f"Last query returned {self.context['last_result_count']} rows"
-            )
+            summary_parts.append(f"Last result: {self.context['last_result_count']} rows")
 
-        # Recent messages
-        recent = self.get_message_history(limit=3, include_results=False)
-        if recent:
-            summary_parts.append(f"Recent messages: {len(recent)} messages")
+        # Last two user messages with actual content so the LLM can resolve references
+        recent_user = [m for m in self.messages if m.role == "user"][-2:]
+        for m in recent_user:
+            # Truncate to avoid prompt bloat
+            text = m.content[:200]
+            summary_parts.append(f'User asked: "{text}"')
 
         return " | ".join(summary_parts) if summary_parts else "No context available."
 
@@ -254,19 +249,21 @@ class ConversationContext:
 
 
 class ConversationManager:
-    """Manages multiple conversation contexts."""
+    """Manages multiple conversation contexts.
+
+    Thread-safe: all mutations of ``self.conversations`` are protected by
+    a reentrant lock so concurrent FastAPI requests cannot corrupt state.
+    """
 
     def __init__(self):
         self.conversations: Dict[str, ConversationContext] = {}
+        self._lock = threading.Lock()
 
     def create_conversation(self) -> ConversationContext:
-        """Create new conversation.
-
-        Returns:
-            New ConversationContext
-        """
+        """Create new conversation and register it."""
         conversation = ConversationContext()
-        self.conversations[conversation.conversation_id] = conversation
+        with self._lock:
+            self.conversations[conversation.conversation_id] = conversation
         logger.info(f"Created conversation: {conversation.conversation_id}")
         return conversation
 
@@ -274,20 +271,13 @@ class ConversationManager:
         self,
         conversation_id: str,
     ) -> Optional[ConversationContext]:
-        """Get existing conversation.
-
-        Args:
-            conversation_id: Conversation ID
-
-        Returns:
-            ConversationContext or None if not found
-        """
-        conversation = self.conversations.get(conversation_id)
-
-        if conversation and conversation.is_expired():
-            logger.warning(f"Conversation expired: {conversation_id}")
-            del self.conversations[conversation_id]
-            return None
+        """Return an existing, non-expired conversation or None."""
+        with self._lock:
+            conversation = self.conversations.get(conversation_id)
+            if conversation and conversation.is_expired():
+                logger.warning(f"Conversation expired: {conversation_id}")
+                del self.conversations[conversation_id]
+                return None
 
         if conversation:
             conversation.last_accessed = datetime.utcnow()
@@ -295,33 +285,23 @@ class ConversationManager:
         return conversation
 
     def delete_conversation(self, conversation_id: str) -> bool:
-        """Delete conversation.
-
-        Args:
-            conversation_id: Conversation ID
-
-        Returns:
-            True if deleted
-        """
-        if conversation_id in self.conversations:
-            del self.conversations[conversation_id]
-            logger.info(f"Deleted conversation: {conversation_id}")
-            return True
+        """Delete conversation. Returns True if it existed."""
+        with self._lock:
+            if conversation_id in self.conversations:
+                del self.conversations[conversation_id]
+                logger.info(f"Deleted conversation: {conversation_id}")
+                return True
         return False
 
     def cleanup_expired(self) -> int:
-        """Remove expired conversations.
-
-        Returns:
-            Number of conversations removed
-        """
-        expired_ids = [
-            cid for cid, conv in self.conversations.items()
-            if conv.is_expired()
-        ]
-
-        for cid in expired_ids:
-            del self.conversations[cid]
+        """Remove expired conversations. Returns count removed."""
+        with self._lock:
+            expired_ids = [
+                cid for cid, conv in self.conversations.items()
+                if conv.is_expired()
+            ]
+            for cid in expired_ids:
+                del self.conversations[cid]
 
         if expired_ids:
             logger.info(f"Cleaned up {len(expired_ids)} expired conversations")
@@ -329,22 +309,15 @@ class ConversationManager:
         return len(expired_ids)
 
     def get_stats(self) -> Dict[str, Any]:
-        """Get conversation manager statistics.
-
-        Returns:
-            Stats dictionary
-        """
-        total_messages = sum(
-            len(conv.messages) for conv in self.conversations.values()
-        )
+        """Return conversation manager statistics."""
+        with self._lock:
+            n = len(self.conversations)
+            total_messages = sum(len(c.messages) for c in self.conversations.values())
 
         return {
-            "active_conversations": len(self.conversations),
+            "active_conversations": n,
             "total_messages": total_messages,
-            "avg_messages_per_conversation": (
-                total_messages // len(self.conversations)
-                if self.conversations else 0
-            ),
+            "avg_messages_per_conversation": total_messages // n if n else 0,
         }
 
 

@@ -55,36 +55,78 @@ MERIDIAN is a multi-agent data navigation platform that uses natural language pr
 
 ## Core Components
 
-### 1. REST API Layer (`app/api/routes/query.py`)
+### 1. REST API Layer (`app/api/routes/`)
 
 **Responsibility**: HTTP interface for external clients
 
-**Endpoints**:
-- `POST /api/query/execute` - Process natural language query
+**Query endpoints** (`query.py`):
+- `POST /api/query/execute` - Process natural language query (accepts `conversation_id`, returns `suggestions`)
 - `POST /api/query/validate` - Validate without executing
 - `GET /api/query/domains` - List available domains
 - `GET /api/query/explore` - Explore domain capabilities
 
+**History endpoints** (`history.py`):
+- `GET /api/history?limit=N` - List recent queries, newest first
+- `GET /api/history/{id}` - Retrieve a single history entry
+- `DELETE /api/history/{id}` - Delete a history entry
+
 **Key Features**:
 - Request/response validation with Pydantic
-- Automatic domain routing
+- Automatic domain routing with optional `forced_domain`
+- `conversation_id` threaded through request/response for multi-turn sessions
 - Optional execution tracing
 - Error handling and logging
 
 ### 2. Orchestrator (`app/agents/orchestrator.py`)
 
-**Responsibility**: Coordinates multi-agent workflow
+**Responsibility**: Coordinates multi-agent workflow with conversation context and history
 
 **Workflow**:
 ```
-Query → Route → Validate → Execute → Return Results
+Query + conversation_id?
+    ↓
+[ConversationManager] — get-or-create session context
+    ↓
+[Cache] — check context-scoped key ({conv_id}::{query})
+    ↓ (miss)
+[Router / forced_domain] — domain classification
+    ↓
+[LangGraph graph.invoke()] — primary execution
+    ↓ (fallback: direct agent call)
+[HistoryManager.save()] — persist result
+    ↓
+[_generate_suggestions()] — 3 LLM follow-ups
+    ↓
+Return result + conversation_id + suggestions
 ```
 
 **Key Methods**:
-- `process_query(query)` - Main workflow
+- `process_query(query, conversation_id, forced_domain)` - Main workflow
+- `process_query_with_trace(query, conversation_id, forced_domain)` - Execution trace
 - `validate_query_for_domain(domain, query)`
-- `process_query_with_trace(query)` - Detailed execution trace
 - `get_domain_capabilities(domain)`
+- `new_conversation()` / `get_conversation(id)` - Session helpers
+
+### 2a. Conversation Manager (`app/agents/conversation_context.py`)
+
+**Responsibility**: Track multi-turn session state in memory
+
+**Key Details**:
+- `ConversationContext` stores message history (user + assistant), last domain/views/result count, and free-form session variables
+- `get_context_summary()` returns a pipe-separated string injected into LLM prompts — includes actual recent user query text so the LLM can resolve pronoun references ("the same", "that region")
+- Conversations expire after 60 minutes; `ConversationManager` runs periodic cleanup every 100 queries
+- Thread-safe: all mutations protected by `threading.Lock`
+
+### 2b. History Manager (`app/history/manager.py`)
+
+**Responsibility**: Persist completed queries to SQLite
+
+**REST API** (registered in `app/api/routes/history.py`):
+- `GET /api/history?limit=N` — newest-first list
+- `GET /api/history/{id}` — single entry
+- `DELETE /api/history/{id}` — delete entry
+
+**Implementation**: Single shared `sqlite3.Connection(check_same_thread=False)` protected by `threading.Lock`; history save failures are swallowed so they never break query processing.
 
 ### 3. Router Agent (`app/agents/router.py`)
 
@@ -256,7 +298,10 @@ Return Results with Confidence + interpretation_method ("llm" | "regex")
      "confidence": 0.85,
      "result": [{"COUNT(sale_id)": 1234}],
      "row_count": 1,
-     "state": "complete"
+     "state": "complete",
+     "conversation_id": "abc-123",
+     "suggestions": ["Top 5 customers?", "Break down by region?", "Compare to last month?"],
+     "cache_hit": false
    }
 ```
 
@@ -315,18 +360,24 @@ INITIAL → ROUTING → VALIDATION → EXECUTION → COMPLETE
 **Test Organization**:
 ```
 tests/
-├── unit/               # Fast, isolated tests
-│   ├── test_views.py   # View registry tests
-│   └── test_queries.py # Query builder tests
-├── integration/        # Multi-component tests
+├── unit/                        # Fast, isolated tests
+│   ├── test_views.py            # View registry (35 tests)
+│   ├── test_llm_phase3.py       # LLM routing + interpretation (20 tests)
+│   └── test_phase4.py           # Conversational Intelligence (50 tests)
+├── integration/                 # Multi-component tests
 │   ├── test_agents.py
-│   ├── test_phase3_phase4.py
+│   ├── test_advanced_features.py
+│   ├── test_history_api.py      # History REST API (12 tests)
 │   ├── test_orchestrator.py
-│   └── test_views.py (DB integration)
-└── fixtures/          # Test data
+│   ├── test_phase3_phase4.py
+│   ├── test_ui_queries.py
+│   └── test_views.py
+└── fixtures/                    # Test data
     ├── data.py
     └── mocks.py
 ```
+
+**Total: 297 tests passing**
 
 **Test Coverage**: 235+ tests, all passing
 

@@ -44,12 +44,25 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-def _build_interpret_prompt(domain: str, schema_json: str, query: str) -> str:
+def _build_interpret_prompt(
+    domain: str,
+    schema_json: str,
+    query: str,
+    context_summary: Optional[str] = None,
+) -> str:
     """Build the query interpretation prompt without using str.format() on user input."""
+    context_section = ""
+    if context_summary and context_summary != "No previous context.":
+        context_section = (
+            f"\nConversation context (use to resolve references like 'that', 'same', 'it'):\n"
+            f"{context_summary}\n"
+        )
+
     return (
         f"You are a query interpreter for the {domain} domain of MERIDIAN BI platform.\n\n"
         f"Available view schemas (domain: {domain}):\n"
-        f"{schema_json}\n\n"
+        f"{schema_json}\n"
+        f"{context_section}\n"
         f'Extract query parameters from this natural language question:\n"{query}"\n\n'
         "Return ONLY a JSON object with these fields:\n"
         '  "selected_views": list of view names from the schema to use (fact tables first)\n'
@@ -61,6 +74,11 @@ def _build_interpret_prompt(domain: str, schema_json: str, query: str) -> str:
         "- At least one view must be selected\n"
         "- Extract exact string values from the query for filters (preserve case of proper nouns)\n"
         "- Fact tables (names ending in _fact) must appear before dimension tables in selected_views"
+        + (
+            "\n- Use conversation context to resolve pronouns or references to prior results"
+            if context_summary and context_summary != "No previous context."
+            else ""
+        )
     )
 
 
@@ -120,12 +138,17 @@ class BaseDomainAgent(ABC):
             }
         return json.dumps(schema, indent=2)
 
-    def _try_llm_interpret(self, query: str) -> Optional[QueryRequest]:
+    def _try_llm_interpret(
+        self,
+        query: str,
+        context_summary: Optional[str] = None,
+    ) -> Optional[QueryRequest]:
         """
         Use GPT-4 to interpret the natural language query into a QueryRequest.
 
         Args:
             query: Natural language query
+            context_summary: Optional conversation context for multi-turn resolution
 
         Returns:
             QueryRequest if successful, None if LLM unavailable or parsing failed.
@@ -138,7 +161,7 @@ class BaseDomainAgent(ABC):
 
         try:
             schema_json = self._get_schema_for_llm()
-            prompt = _build_interpret_prompt(self.domain, schema_json, query)
+            prompt = _build_interpret_prompt(self.domain, schema_json, query, context_summary)
             response = llm.invoke(prompt)  # type: ignore[union-attr]
             content = response.content if hasattr(response, "content") else str(response)
 
@@ -172,7 +195,11 @@ class BaseDomainAgent(ABC):
             return None
 
     @abstractmethod
-    def process_query(self, natural_language_query: str) -> Dict[str, Any]:
+    def process_query(
+        self,
+        natural_language_query: str,
+        context_summary: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         Process a natural language query for this domain.
 

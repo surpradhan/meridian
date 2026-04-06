@@ -8,6 +8,7 @@ Results are always displayed in clean tabular format.
 import logging
 import os
 import tempfile
+from typing import List, Optional
 import pandas as pd
 import gradio as gr
 
@@ -31,6 +32,8 @@ SAMPLE_QUERIES = [
     "Show me all ledger transactions",
     "What is the inventory in each warehouse?",
 ]
+
+MAX_SUGGESTIONS = 3
 
 
 def format_result_as_table(result: list) -> pd.DataFrame:
@@ -74,52 +77,46 @@ def build_metadata_html(result: dict, show_sql: bool) -> str:
     return html
 
 
-def process_query(question: str, domain_choice: str, show_sql: bool):
+def process_query(
+    question: str,
+    domain_choice: str,
+    show_sql: bool,
+    conversation_id: Optional[str] = None,
+):
     """
     Process a natural language query and return tabular results + metadata.
 
+    Forced-domain selection is routed through the orchestrator's ``forced_domain``
+    parameter so conversation context and history are always maintained.
+
     Returns:
-        Tuple of (DataFrame, error_html, metadata_html, csv_file_path)
+        Tuple of (DataFrame, error_html, metadata_html, csv_file_path,
+                  suggestions_list, conversation_id)
     """
     empty_df = pd.DataFrame()
 
     if not question.strip():
-        return empty_df, "", "", None
+        return empty_df, "", "", None, [], conversation_id
 
     try:
-        # Route manually or auto
-        if domain_choice == "Auto-detect":
-            result = orchestrator.process_query(question)
-        else:
-            # Force domain by directly calling the domain agent
-            domain_key = domain_choice.lower()
-            agent = orchestrator.domain_agents.get(domain_key)
-            if not agent:
-                error_html = (
-                    f'<div class="error-alert">'
-                    f'⚠️ Unknown domain: <strong>{domain_choice}</strong>. '
-                    f'Please choose a valid domain or use Auto-detect.'
-                    f'</div>'
-                )
-                return empty_df, error_html, "", None
-            result = agent.process_query(question)
-            result["domain"] = domain_key
-            result["routing_confidence"] = 1.0
-            result["state"] = "complete"
+        forced = None if domain_choice == "Auto-detect" else domain_choice.lower()
+        result = orchestrator.process_query(
+            question,
+            conversation_id=conversation_id,
+            forced_domain=forced,
+        )
 
-        # Handle errors returned by the agent
+        new_conv_id = result.get("conversation_id", conversation_id)
+
         if "error" in result and result["error"]:
             error_html = f'<div class="error-alert">⚠️ {result["error"]}</div>'
-            return empty_df, error_html, "", None
+            return empty_df, error_html, "", None, [], new_conv_id
 
-        # Build results table
         raw_results = result.get("result", [])
         df = format_result_as_table(raw_results)
-
-        # Build styled metadata badges
         metadata_html = build_metadata_html(result, show_sql)
+        suggestions: List[str] = result.get("suggestions") or []
 
-        # Generate CSV for download (only when there are real data rows)
         csv_path = None
         if raw_results:
             tmp = tempfile.NamedTemporaryFile(
@@ -128,7 +125,7 @@ def process_query(question: str, domain_choice: str, show_sql: bool):
             df.to_csv(tmp.name, index=False)
             csv_path = tmp.name
 
-        return df, "", metadata_html, csv_path
+        return df, "", metadata_html, csv_path, suggestions, new_conv_id
 
     except Exception as e:
         logger.error(f"UI query failed: {e}", exc_info=True)
@@ -138,7 +135,7 @@ def process_query(question: str, domain_choice: str, show_sql: bool):
             f'Try rephrasing your question.'
             f'</div>'
         )
-        return empty_df, error_html, "", None
+        return empty_df, error_html, "", None, [], conversation_id
 
 
 # ---------------------------------------------------------------------------
@@ -147,7 +144,6 @@ def process_query(question: str, domain_choice: str, show_sql: bool):
 
 FAVICON_PATH = "assets/favicon.svg"
 
-# Inline SVG compass logo for the header (36 px, matches brand palette)
 LOGO_SVG = """
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none"
      style="width:36px;height:36px;vertical-align:middle;margin-right:10px">
@@ -319,7 +315,6 @@ MERIDIAN_CSS = """
 }
 
 /* ── Sidebar domain selector as cards ───────────────────── */
-/* Hide the radio circle; style the whole label as a card.  */
 #domain-radio input[type="radio"] {
     display: none !important;
 }
@@ -371,6 +366,14 @@ MERIDIAN_CSS = """
     color: #9ca3af;
     text-align: center;
     padding: 10px 0;
+}
+
+/* ── Follow-up suggestion label ──────────────────────────── */
+.suggestions-label p {
+    font-size: 0.8em !important;
+    font-weight: 600 !important;
+    color: #6b7280 !important;
+    margin: 6px 0 2px !important;
 }
 
 /* ── Dark mode ───────────────────────────────────────────── */
@@ -434,23 +437,25 @@ def build_ui() -> gr.Blocks:
                     submit_btn = gr.Button("Ask", variant="primary", scale=2)
                     clear_btn = gr.Button("Clear", scale=1)
 
-                # Error alert — empty until an error occurs
                 error_box = gr.HTML(value="")
-
-                # ── CHANGE 1: Metadata badges now sit ABOVE the results table ──
-                # Users see confidence scores before they scan the data rows.
                 metadata = gr.HTML(value="")
 
-                # ── CHANGE 3: Welcome card = empty state + quick-start unified ─
-                # Both live inside one Group that hides after the first query runs,
-                # replacing the separate quickstart-label + loose button row.
+                # ── Follow-up suggestions (Phase 4.3) ───────────────────────
+                # Three real Gradio buttons so clicks can populate the question
+                # textbox through normal event wiring (HTML buttons cannot do this).
+                with gr.Group(visible=False) as suggestions_group:
+                    gr.Markdown("💡 **Follow up:**", elem_classes=["suggestions-label"])
+                    with gr.Row():
+                        sugg_btn_0 = gr.Button("", size="sm", visible=False)
+                        sugg_btn_1 = gr.Button("", size="sm", visible=False)
+                        sugg_btn_2 = gr.Button("", size="sm", visible=False)
+
                 with gr.Group(visible=True, elem_classes=["welcome-card"]) as welcome_group:
                     gr.HTML(value=EMPTY_STATE_HTML)
                     gr.HTML('<p class="quickstart-label">Try an example:</p>')
                     with gr.Row():
                         sample_btns = [gr.Button(q, size="sm") for q in SAMPLE_QUERIES]
 
-                # Results table — hidden until first query runs
                 results_table = gr.Dataframe(
                     label="Results",
                     interactive=False,
@@ -458,7 +463,6 @@ def build_ui() -> gr.Blocks:
                     visible=False,
                 )
 
-                # CSV download — hidden until results with real data are returned
                 download_file = gr.File(
                     label="Download Results (CSV)",
                     visible=False,
@@ -494,82 +498,104 @@ def build_ui() -> gr.Blocks:
                         label="",
                     )
 
-        # History state — lives outside any column so it persists across interactions
+        # ── Persistent state ─────────────────────────────────────────────────
         history_state = gr.State([])
+        conversation_state = gr.State(None)
+        # Stores the list of suggestion strings so button-click handlers can
+        # read the text by index without needing JS or global state.
+        suggestions_state = gr.State([])
 
-        # ── Event helpers ────────────────────────────────────────────────────
+        # ── Output lists ─────────────────────────────────────────────────────
 
-        ALL_OUTPUTS = [results_table, error_box, welcome_group, metadata, download_file]
-
-        # ── History helpers ───────────────────────────────────────────────────
-
-        MAX_HISTORY = 10  # keep last N questions
+        MAX_HISTORY = 10
 
         def build_history_html(history: list) -> str:
-            """Render the history list as clickable pill items."""
             if not history:
                 return '<p class="history-empty">No queries yet</p>'
+            import html as _h
             items = ""
             for q in reversed(history):
-                import html as _h
                 safe = _h.escape(q)
-                # Truncate display label at 42 chars for readability
                 label = (q[:42] + "…") if len(q) > 42 else q
                 safe_label = _h.escape(label)
                 items += (
-                    f'<button class="history-item" '
-                    f'title="{safe}" '
-                    f'onclick="'
-                    f'  var tb = document.querySelector(\'textarea[data-testid=\\\"textbox\\\"]\');"'
-                    f'>{safe_label}</button>\n'
+                    f'<button class="history-item" title="{safe}">'
+                    f'{safe_label}</button>\n'
                 )
             return items
 
-        def run_query(question_val, domain_val, show_sql_val, history_val):
-            """Run a query; update all outputs, history panel, and restore button."""
-            df, error_html, meta_html, csv_path = process_query(
-                question_val, domain_val, show_sql_val
+        def run_query(question_val, domain_val, show_sql_val, history_val, conv_id):
+            """Run a query; update all outputs, history panel, and button state."""
+            df, error_html, meta_html, csv_path, sugg_list, new_conv_id = process_query(
+                question_val, domain_val, show_sql_val, conversation_id=conv_id
             )
-            # Append to history (deduplicate consecutive identical questions)
+
             new_history = list(history_val)
             q = question_val.strip()
             if q and (not new_history or new_history[-1] != q):
                 new_history.append(q)
-            new_history = new_history[-MAX_HISTORY:]  # cap length
+            new_history = new_history[-MAX_HISTORY:]
+
+            # Populate suggestion buttons with current suggestion text
+            have_suggs = bool(sugg_list)
+            s0 = sugg_list[0] if len(sugg_list) > 0 else ""
+            s1 = sugg_list[1] if len(sugg_list) > 1 else ""
+            s2 = sugg_list[2] if len(sugg_list) > 2 else ""
 
             return (
-                gr.update(value=df, visible=True),                    # results_table
-                error_html,                                             # error_box
-                gr.update(visible=False),                               # welcome_group
-                meta_html,                                              # metadata
-                gr.update(value=csv_path, visible=bool(csv_path)),    # download_file
-                gr.update(value="Ask", interactive=True),              # submit_btn
-                new_history,                                            # history_state
-                build_history_html(new_history),                       # history_display
+                gr.update(value=df, visible=True),                     # results_table
+                error_html,                                              # error_box
+                gr.update(visible=False),                                # welcome_group
+                meta_html,                                               # metadata
+                gr.update(value=csv_path, visible=bool(csv_path)),     # download_file
+                gr.update(visible=have_suggs),                          # suggestions_group
+                gr.update(value=s0, visible=bool(s0)),                  # sugg_btn_0
+                gr.update(value=s1, visible=bool(s1)),                  # sugg_btn_1
+                gr.update(value=s2, visible=bool(s2)),                  # sugg_btn_2
+                gr.update(value="Ask", interactive=True),               # submit_btn
+                new_history,                                             # history_state
+                build_history_html(new_history),                        # history_display
+                new_conv_id,                                             # conversation_state
+                sugg_list,                                               # suggestions_state
             )
 
         def clear_all(history_val):
-            """Reset main panel; preserve history across clears."""
+            """Reset main panel; preserve history, start fresh conversation."""
             return (
-                gr.update(value=pd.DataFrame(), visible=False),   # results_table
-                "",                                                # error_box
-                gr.update(visible=True),                           # welcome_group
-                "",                                                # metadata
-                gr.update(value=None, visible=False),             # download_file
-                gr.update(value=""),                              # question textbox
-                gr.update(value="Ask", interactive=True),         # submit_btn
+                gr.update(value=pd.DataFrame(), visible=False),    # results_table
+                "",                                                 # error_box
+                gr.update(visible=True),                            # welcome_group
+                "",                                                 # metadata
+                gr.update(value=None, visible=False),              # download_file
+                gr.update(visible=False),                           # suggestions_group
+                gr.update(value="", visible=False),                 # sugg_btn_0
+                gr.update(value="", visible=False),                 # sugg_btn_1
+                gr.update(value="", visible=False),                 # sugg_btn_2
+                gr.update(value=""),                                # question
+                gr.update(value="Ask", interactive=True),          # submit_btn
+                None,                                               # conversation_state
+                [],                                                 # suggestions_state
             )
 
-        # ── Event wiring ─────────────────────────────────────────────────────
+        # ── Output lists ─────────────────────────────────────────────────────
 
-        QUERY_OUTPUTS = ALL_OUTPUTS + [submit_btn, history_state, history_display]
+        CORE_OUTPUTS = [
+            results_table, error_box, welcome_group, metadata, download_file,
+            suggestions_group, sugg_btn_0, sugg_btn_1, sugg_btn_2,
+        ]
+        QUERY_OUTPUTS = CORE_OUTPUTS + [
+            submit_btn, history_state, history_display,
+            conversation_state, suggestions_state,
+        ]
+
+        # ── Event wiring ─────────────────────────────────────────────────────
 
         submit_btn.click(
             fn=lambda: gr.update(value="Thinking…", interactive=False),
             outputs=submit_btn,
         ).then(
             fn=run_query,
-            inputs=[question, domain_choice, show_sql, history_state],
+            inputs=[question, domain_choice, show_sql, history_state, conversation_state],
             outputs=QUERY_OUTPUTS,
         )
 
@@ -578,14 +604,14 @@ def build_ui() -> gr.Blocks:
             outputs=submit_btn,
         ).then(
             fn=run_query,
-            inputs=[question, domain_choice, show_sql, history_state],
+            inputs=[question, domain_choice, show_sql, history_state, conversation_state],
             outputs=QUERY_OUTPUTS,
         )
 
         clear_btn.click(
             fn=clear_all,
             inputs=[history_state],
-            outputs=ALL_OUTPUTS + [question, submit_btn],
+            outputs=CORE_OUTPUTS + [question, submit_btn, conversation_state, suggestions_state],
         )
 
         for btn, q in zip(sample_btns, SAMPLE_QUERIES):
@@ -594,16 +620,33 @@ def build_ui() -> gr.Blocks:
                 outputs=[question, submit_btn],
             ).then(
                 fn=run_query,
-                inputs=[question, domain_choice, show_sql, history_state],
+                inputs=[question, domain_choice, show_sql, history_state, conversation_state],
                 outputs=QUERY_OUTPUTS,
             )
 
-        # Clicking a history item re-populates the question textbox
-        def recall_history_item(item_question: str):
-            return gr.update(value=item_question)
+        # ── Suggestion button clicks ──────────────────────────────────────────
+        # Each button reads from suggestions_state by index so clicking it
+        # populates the question textbox with the exact suggestion text, then
+        # triggers a new query automatically.
 
+        def pick_suggestion(idx: int, sugg: list):
+            text = sugg[idx] if idx < len(sugg) else ""
+            return text, gr.update(value="Thinking…", interactive=False)
+
+        for btn_idx, sugg_btn in enumerate([sugg_btn_0, sugg_btn_1, sugg_btn_2]):
+            sugg_btn.click(
+                fn=lambda s, i=btn_idx: pick_suggestion(i, s),
+                inputs=[suggestions_state],
+                outputs=[question, submit_btn],
+            ).then(
+                fn=run_query,
+                inputs=[question, domain_choice, show_sql, history_state, conversation_state],
+                outputs=QUERY_OUTPUTS,
+            )
+
+        # History item click re-populates the question textbox
         history_display.select(
-            fn=recall_history_item,
+            fn=lambda item: gr.update(value=item),
             inputs=history_display,
             outputs=question,
         )

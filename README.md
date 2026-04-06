@@ -120,10 +120,10 @@ View Registry, Sales/Finance/Operations agents, QueryBuilder, QueryValidator, RE
 Redis caching, pagination, rate limiting, OpenTelemetry tracing, and Langsmith integration wired and active.
 
 ### Phase 3: LLM-Powered NL Understanding — ✅ COMPLETED
-GPT-4 domain routing and query interpretation with two-stage regex fallback. Confidence-based clarification (threshold 0.4). Shared LLM client singleton. 235+ tests.
+GPT-4 domain routing and query interpretation with two-stage regex fallback. Confidence-based clarification (threshold 0.4). Shared LLM client singleton.
 
-### Phase 4: Conversational Intelligence (Weeks 6–8)
-Multi-turn conversations, query history, smart follow-up suggestions, LangGraph as primary orchestrator.
+### Phase 4: Conversational Intelligence — ✅ COMPLETED
+Multi-turn conversation context (session-aware query refinement, context threading, conversation expiry + periodic cleanup), persistent query history (SQLite + REST API at `/api/history`), LLM-generated follow-up suggestions wired as real interactive buttons in the Gradio UI, and LangGraph promoted to primary execution engine (with transparent direct-agent fallback). 297+ tests passing.
 
 ### Phase 5: Enterprise Security (Weeks 9–12)
 JWT auth, row-level access control, audit logging, CORS lockdown.
@@ -255,8 +255,8 @@ See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for cloud deployment (AWS, GCP, Azu
 
 ## Development Status
 
-- **Current Phase:** Phase 3 (LLM-Powered NL Understanding) COMPLETE → Next: Phase 4 (Conversational Intelligence)
-- **Version:** 0.2.0
+- **Current Phase:** Phase 4 (Conversational Intelligence) COMPLETE → Next: Phase 5 (Enterprise Security)
+- **Version:** 0.4.0
 - **Python:** 3.11+
 - **License:** MIT
 

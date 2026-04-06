@@ -7,7 +7,7 @@ Understands operations-specific concepts like inventory, warehouses, shipments, 
 
 import logging
 import re
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from app.views.models import QueryRequest
 from app.agents.domain.base_domain import BaseDomainAgent
 
@@ -54,7 +54,11 @@ class OperationsAgent(BaseDomainAgent):
             "MAX": ["maximum", "highest"],
         }
 
-    def process_query(self, natural_language_query: str) -> Dict[str, Any]:
+    def process_query(
+        self,
+        natural_language_query: str,
+        context_summary: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         Process a natural language operations query.
 
@@ -65,6 +69,7 @@ class OperationsAgent(BaseDomainAgent):
 
         Args:
             natural_language_query: Natural language question
+            context_summary: Optional conversation context for multi-turn refinement
 
         Returns:
             Dict with result, SQL, confidence, etc.
@@ -77,7 +82,7 @@ class OperationsAgent(BaseDomainAgent):
             # Try LLM interpretation first; fall back to regex on failure or unavailability.
             # Two-stage fallback: _try_llm_interpret catches parse/API errors; the inner
             # try/except below catches execution failures from a bad LLM-generated request.
-            llm_request = self._try_llm_interpret(natural_language_query)
+            llm_request = self._try_llm_interpret(natural_language_query, context_summary)
             if llm_request is not None:
                 try:
                     result = self.execute_query_request(llm_request)

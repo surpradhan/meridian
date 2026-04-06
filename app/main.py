@@ -54,8 +54,10 @@ tracing.instrument_app(app)
 
 # Register API routes
 from app.api.routes import query as query_routes
+from app.api.routes import history as history_routes
 
 app.include_router(query_routes.router)
+app.include_router(history_routes.router)
 
 
 @app.get("/health")

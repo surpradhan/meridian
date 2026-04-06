@@ -6,7 +6,7 @@ for more robust, scalable multi-agent coordination.
 """
 
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional  # noqa: F401 — Optional used in _process_with_agent
 from enum import Enum
 
 try:
@@ -126,7 +126,17 @@ class LangraphOrchestrator:
         return workflow
 
     def _route_query(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """Route query to appropriate domain."""
+        """Route query to appropriate domain.
+
+        If ``domain`` is already set in state (pre-routed by the outer
+        Orchestrator) routing is skipped so we don't discard the caller's
+        domain choice or waste an LLM call.
+        """
+        if state.get("domain"):
+            # Domain was pre-set by the caller — honour it.
+            state["state"] = WorkflowState.ROUTING.value
+            return state
+
         query = state.get("query", "")
         logger.debug(f"Routing query: {query}")
 
@@ -139,9 +149,10 @@ class LangraphOrchestrator:
         return state
 
     def _process_with_agent(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """Process query with domain agent."""
+        """Process query with domain agent, threading conversation context."""
         domain = state.get("domain")
         query = state.get("query", "")
+        context_summary: Optional[str] = state.get("context_summary")
 
         logger.debug(f"Processing with {domain} agent")
 
@@ -151,7 +162,7 @@ class LangraphOrchestrator:
             return state
 
         try:
-            result = agent.process_query(query)
+            result = agent.process_query(query, context_summary)
             state.update(result)
             state["state"] = WorkflowState.AGENT_PROCESSING.value
             return state

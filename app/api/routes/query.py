@@ -31,6 +31,11 @@ class QueryRequest(BaseModel):
     )
     page: Optional[int] = Field(default=1, ge=1, description="Page number (1-indexed)")
     page_size: Optional[int] = Field(default=100, ge=1, le=10000, description="Rows per page")
+    conversation_id: Optional[str] = Field(
+        default=None,
+        description="Session ID for multi-turn conversation context. "
+                    "Omit to start a new conversation; reuse to continue an existing one.",
+    )
 
     class Config:
         """Example for documentation."""
@@ -73,6 +78,14 @@ class QueryResponse(BaseModel):
     interpretation_method: Optional[str] = Field(
         default=None,
         description="How the query was interpreted: 'llm' or 'regex'",
+    )
+    conversation_id: Optional[str] = Field(
+        default=None,
+        description="Session ID — pass back in subsequent requests for multi-turn context",
+    )
+    suggestions: Optional[list] = Field(
+        default=None,
+        description="Suggested follow-up questions based on the current query and result",
     )
 
     class Config:
@@ -130,7 +143,9 @@ async def execute_query(request: QueryRequest) -> Dict[str, Any]:
 
         # Process query
         if request.trace:
-            result = orchestrator.process_query_with_trace(request.question)
+            result = orchestrator.process_query_with_trace(
+                request.question, conversation_id=request.conversation_id
+            )
             # Convert trace result to standard response format
             if "error" in result:
                 error_result = {
@@ -144,7 +159,9 @@ async def execute_query(request: QueryRequest) -> Dict[str, Any]:
 
             result["trace"] = result.get("steps", [])
         else:
-            result = orchestrator.process_query(request.question)
+            result = orchestrator.process_query(
+                request.question, conversation_id=request.conversation_id
+            )
 
         # Check for errors
         if "error" in result:
