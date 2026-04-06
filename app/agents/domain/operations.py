@@ -74,6 +74,23 @@ class OperationsAgent(BaseDomainAgent):
         query_lower = natural_language_query.lower()
 
         try:
+            # Try LLM interpretation first; fall back to regex on failure or unavailability.
+            # Two-stage fallback: _try_llm_interpret catches parse/API errors; the inner
+            # try/except below catches execution failures from a bad LLM-generated request.
+            llm_request = self._try_llm_interpret(natural_language_query)
+            if llm_request is not None:
+                try:
+                    result = self.execute_query_request(llm_request)
+                    result["confidence"] = self._calculate_confidence(natural_language_query, result)
+                    result["interpretation_method"] = "llm"
+                    logger.info(f"LLM query executed successfully. Rows returned: {result['row_count']}")
+                    return result
+                except Exception as exec_err:
+                    logger.warning(
+                        f"LLM-generated request failed ({exec_err}), falling back to regex"
+                    )
+
+            # Regex fallback
             # Step 1: Identify relevant views
             relevant_views = self._identify_views(query_lower)
             logger.debug(f"Identified views: {relevant_views}")
@@ -98,6 +115,7 @@ class OperationsAgent(BaseDomainAgent):
             result = self.execute_query_request(request)
             confidence = self._calculate_confidence(natural_language_query, result)
             result["confidence"] = confidence
+            result["interpretation_method"] = "regex"
 
             logger.info(f"Query executed successfully. Rows returned: {result['row_count']}")
             return result

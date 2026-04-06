@@ -58,6 +58,22 @@ class QueryResponse(BaseModel):
     state: str = Field(description="Execution state (complete, error)")
     trace: Optional[Any] = Field(default=None, description="Execution trace if requested")
     pagination: Optional[Dict[str, Any]] = Field(default=None, description="Pagination metadata")
+    needs_clarification: Optional[bool] = Field(
+        default=None,
+        description="True when routing confidence is too low and user input is needed",
+    )
+    clarification_message: Optional[str] = Field(
+        default=None,
+        description="Human-readable message explaining what clarification is needed",
+    )
+    suggested_domains: Optional[list] = Field(
+        default=None,
+        description="Domain names the user might clarify their question toward",
+    )
+    interpretation_method: Optional[str] = Field(
+        default=None,
+        description="How the query was interpreted: 'llm' or 'regex'",
+    )
 
     class Config:
         """Allow extra fields from orchestrator and provide schema example."""

@@ -5,13 +5,16 @@ Abstract base class for domain-specific agents (Sales, Finance, Operations).
 Provides common functionality like view discovery, query building, and execution.
 """
 
+import json
 import logging
+import re
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
 from app.views.models import QueryRequest
 from app.views.registry import ViewRegistry
 from app.query.builder import QueryBuilder
 from app.database.connection import DbConnection
+from app.agents.llm_client import get_llm
 
 try:
     from tenacity import (
@@ -39,6 +42,26 @@ except ImportError:
         return None
 
 logger = logging.getLogger(__name__)
+
+
+def _build_interpret_prompt(domain: str, schema_json: str, query: str) -> str:
+    """Build the query interpretation prompt without using str.format() on user input."""
+    return (
+        f"You are a query interpreter for the {domain} domain of MERIDIAN BI platform.\n\n"
+        f"Available view schemas (domain: {domain}):\n"
+        f"{schema_json}\n\n"
+        f'Extract query parameters from this natural language question:\n"{query}"\n\n'
+        "Return ONLY a JSON object with these fields:\n"
+        '  "selected_views": list of view names from the schema to use (fact tables first)\n'
+        '  "filters": dict mapping column_name to value for WHERE filters (empty dict if none)\n'
+        '  "aggregations": dict mapping column_name to function (SUM|COUNT|AVG|MIN|MAX) (empty dict if none)\n'
+        '  "group_by": list of column names for GROUP BY (empty list if none)\n\n'
+        "Rules:\n"
+        "- Only use view names and column names that appear in the schema above\n"
+        "- At least one view must be selected\n"
+        "- Extract exact string values from the query for filters (preserve case of proper nouns)\n"
+        "- Fact tables (names ending in _fact) must appear before dimension tables in selected_views"
+    )
 
 
 class BaseDomainAgent(ABC):
@@ -77,6 +100,76 @@ class BaseDomainAgent(ABC):
         self.builder = builder
 
         logger.info(f"Initialized {domain} agent")
+
+    def _get_schema_for_llm(self) -> str:
+        """Build a compact schema description for LLM prompts."""
+        views = self.registry.get_views_by_domain(self.domain)
+        schema: Dict[str, Any] = {}
+        for view in views:
+            schema[view.name] = {
+                "description": view.description,
+                "type": view.view_type,
+                "columns": [
+                    {
+                        "name": col.name,
+                        "type": col.data_type,
+                        "description": col.description,
+                    }
+                    for col in view.columns
+                ],
+            }
+        return json.dumps(schema, indent=2)
+
+    def _try_llm_interpret(self, query: str) -> Optional[QueryRequest]:
+        """
+        Use GPT-4 to interpret the natural language query into a QueryRequest.
+
+        Args:
+            query: Natural language query
+
+        Returns:
+            QueryRequest if successful, None if LLM unavailable or parsing failed.
+            Does NOT catch execution errors — callers must handle those separately
+            so they can fall back to the regex pipeline on a bad QueryRequest.
+        """
+        llm = get_llm()
+        if llm is None:
+            return None
+
+        try:
+            schema_json = self._get_schema_for_llm()
+            prompt = _build_interpret_prompt(self.domain, schema_json, query)
+            response = llm.invoke(prompt)  # type: ignore[union-attr]
+            content = response.content if hasattr(response, "content") else str(response)
+
+            # Extract JSON — handle markdown code fences if present
+            json_match = re.search(r"\{.*\}", content, re.DOTALL)
+            if not json_match:
+                raise ValueError(f"LLM did not return valid JSON: {content!r}")
+
+            parsed = json.loads(json_match.group())
+
+            selected_views = parsed.get("selected_views") or []
+            if not selected_views:
+                raise ValueError("LLM returned empty selected_views")
+
+            request = QueryRequest(
+                selected_views=selected_views,
+                filters=parsed.get("filters") or None,
+                aggregations=parsed.get("aggregations") or None,
+                group_by=parsed.get("group_by") or None,
+                limit=100,
+            )
+            logger.info(
+                f"LLM interpreted query for {self.domain}: "
+                f"views={selected_views}, filters={request.filters}, "
+                f"aggs={request.aggregations}, group_by={request.group_by}"
+            )
+            return request
+
+        except Exception as e:
+            logger.warning(f"LLM query interpretation failed for {self.domain}, using regex: {e}")
+            return None
 
     @abstractmethod
     def process_query(self, natural_language_query: str) -> Dict[str, Any]:

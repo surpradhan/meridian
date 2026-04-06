@@ -22,6 +22,10 @@ from app.cache.manager import CacheManager, CacheConfig
 
 logger = logging.getLogger(__name__)
 
+# Routing confidence below this threshold triggers a clarification request
+# instead of guessing — avoids confidently wrong answers.
+CLARIFICATION_THRESHOLD = 0.4
+
 
 class QueryState(str, Enum):
     """States in query processing workflow."""
@@ -129,6 +133,28 @@ class Orchestrator:
         # Step 1: Route query to appropriate domain
         domain, routing_confidence = self.router.route(query)
         logger.debug(f"Routed to {domain} with confidence {routing_confidence:.2f}")
+
+        # Step 1b: Check if confidence is too low to proceed reliably
+        if routing_confidence < CLARIFICATION_THRESHOLD:
+            logger.info(
+                f"Low routing confidence ({routing_confidence:.2f}) — requesting clarification"
+            )
+            return {
+                "needs_clarification": True,
+                "clarification_message": (
+                    f"I'm not sure which business area your question relates to "
+                    f"(confidence: {routing_confidence:.0%}). "
+                    f"Could you add more context? For example, mention whether you're "
+                    f"asking about sales/customers, finance/accounting, or "
+                    f"inventory/warehouses/shipments."
+                ),
+                "suggested_domains": list(self.domain_agents.keys()),
+                "domain": domain,
+                "routing_confidence": routing_confidence,
+                "state": QueryState.COMPLETE.value,
+                "confidence": routing_confidence,
+                "cache_hit": False,
+            }
 
         # Step 2: Get appropriate domain agent
         agent = self.domain_agents.get(domain)
@@ -262,6 +288,25 @@ class Orchestrator:
             "domain": domain,
             "confidence": confidence,
         })
+
+        # Step 1b: Clarification check (same threshold as process_query)
+        if confidence < CLARIFICATION_THRESHOLD:
+            logger.info(
+                f"Low routing confidence ({confidence:.2f}) — requesting clarification (trace mode)"
+            )
+            trace["needs_clarification"] = True
+            trace["clarification_message"] = (
+                f"I'm not sure which business area your question relates to "
+                f"(confidence: {confidence:.0%}). "
+                f"Could you add more context? For example, mention whether you're "
+                f"asking about sales/customers, finance/accounting, or "
+                f"inventory/warehouses/shipments."
+            )
+            trace["suggested_domains"] = list(self.domain_agents.keys())
+            trace["domain"] = domain
+            trace["routing_confidence"] = confidence
+            trace["state"] = QueryState.COMPLETE.value
+            return trace
 
         # Step 2: Domain agent processing
         logger.debug(f"Step 2: Processing with {domain} agent")
