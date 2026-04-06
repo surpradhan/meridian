@@ -51,17 +51,17 @@ MERIDIAN routes queries to specialized domain agents (Sales, Finance, Operations
 
 ### Prototype Outcomes (Completed)
 - ✅ 3 working domain agents (Sales, Finance, Operations)
-- ✅ Intelligent query routing via keyword-based classification
+- ✅ Intelligent query routing via LLM classification (GPT-4) with keyword fallback
 - ✅ Multi-agent orchestration with state machine + LangGraph fallback
 - ✅ Safe query generation and execution with validation pipeline
 - ✅ REST API serving agent requests (6 endpoints)
 - ✅ Gradio chat UI for interactive querying
 - ✅ Structured JSON logging throughout pipeline
 - ✅ Docker containerization (dev + prod)
-- ✅ 158+ passing tests (unit + integration)
+- ✅ 235+ passing tests (unit + integration)
 
 ### Vision (Next Phases)
-- 🔲 LLM-powered natural language understanding (replace regex with GPT-4)
+- ✅ LLM-powered natural language understanding (GPT-4 routing + interpretation, regex fallback)
 - 🔲 Multi-turn conversational queries with context memory
 - 🔲 Enterprise security (auth, row-level access, audit logging)
 - 🔲 Advanced SQL capabilities (window functions, CTEs, time intelligence)
@@ -304,7 +304,7 @@ meridian/
 
 | Layer | Maturity | Key Gap |
 |-------|----------|---------|
-| NL Understanding | 30% | Pure regex/keyword matching; no LLM reasoning |
+| NL Understanding | 75% | GPT-4 routing + interpretation active; regex fallback; no multi-turn context |
 | Query Building | 80% | Missing HAVING, subqueries, window functions, CTEs |
 | Query Validation | 70% | No SQL syntax validation |
 | REST API | 60% | No auth, pagination not wired, rate limiting not wired |
@@ -313,7 +313,7 @@ meridian/
 | Observability | 40% | Structured logging complete; metrics/tracing scaffolded but unwired |
 | Caching & Performance | 30% | Redis cache code exists but not integrated |
 
-**Overall Product Maturity: ~60%** — Core architecture is sound, testing is comprehensive, code quality is high. The primary gaps are: no LLM-powered understanding (regex-only), production features half-implemented, and no security layer.
+**Overall Product Maturity: ~70%** — Core architecture is sound, testing is comprehensive, code quality is high. Phase 3 (LLM-powered NL understanding) is complete. The primary remaining gaps are: production features half-implemented and no security layer.
 
 ---
 
@@ -332,7 +332,7 @@ All foundational prototype work has been completed. Code implementations live in
 | **Production (partial)** | Docker Compose (dev + prod), Structured JSON logging, Gunicorn config | `docker-compose.yml`, `docker-compose.prod.yml`, `app/observability/logging.py` | ✅ Complete |
 | **Production (remaining)** | Redis caching (written, not wired), Pagination (written, not wired), Rate limiting (configured, not implemented), OpenTelemetry (installed, not integrated), Langsmith (configured, not integrated), Conversation context (written, not wired), Streaming responses, Retry policies, Load testing, Performance benchmarks | `app/cache/manager.py`, `app/query/pagination.py`, `app/api/middleware.py`, `app/observability/tracing.py`, `app/agents/conversation_context.py`, `app/config.py` | ❌ Incomplete — addressed in Phases 2–7 |
 
-**Testing:** 158+ tests passing across unit and integration suites.
+**Testing:** 235+ tests passing across unit and integration suites.
 
 ---
 
@@ -382,38 +382,33 @@ This phase completes the remaining items from the original Phase 5 (Production) 
 
 ---
 
-### Phase 3: LLM-Powered NL Understanding (Weeks 3–5)
+### Phase 3: LLM-Powered NL Understanding — COMPLETED
 
 **Theme:** *"Make the AI actually AI"*
 **Goal:** Replace regex with LLM-powered query interpretation — the single highest-impact change
 
-Currently, Meridian's "AI" is keyword matching. The OpenAI API key is configured in `app/config.py` but never called. This phase transforms the product from a keyword search tool into a genuine natural language interface.
+#### 3.1 LLM-Powered Domain Routing ✅
+- **What:** GPT-4 classification call in `app/agents/router.py` replaces keyword-only scoring
+- **Approach:** Prompt with domain descriptions + view schemas → structured JSON output (domain, confidence, reasoning)
+- **Fallback:** Keyword scoring used when LLM is unavailable or returns unparseable/unknown output
+- **Files:** `app/agents/router.py`, `app/agents/llm_client.py`
 
-#### 3.1 LLM-Powered Domain Routing
-- **What:** Replace keyword scoring in `app/agents/router.py` with a GPT-4 classification call
-- **Why:** Current routing fails on synonyms ("employees" vs "customers"), ambiguous queries, and multi-domain questions; defaults to Sales with 0.33 confidence on no match
-- **Approach:** Few-shot prompt with domain descriptions + view schemas → structured JSON output (domain, confidence, reasoning)
-- **Fallback:** Keep existing keyword routing as fallback if LLM call fails
-- **Files:** `app/agents/router.py`, `app/config.py`
-- **Effort:** Medium
+#### 3.2 LLM-Powered Query Interpretation ✅
+- **What:** Each domain agent calls GPT-4 to extract views, filters, aggregations, group-by as a structured `QueryRequest`
+- **Approach:** Domain view schemas sent in prompt → JSON response parsed into `QueryRequest`
+- **Two-stage fallback:** LLM API/parse errors fall back to regex; LLM-generated requests that fail execution also fall back to regex
+- **Files:** `app/agents/domain/base_domain.py`, `app/agents/domain/sales.py`, `app/agents/domain/finance.py`, `app/agents/domain/operations.py`
 
-#### 3.2 LLM-Powered Query Interpretation
-- **What:** Replace regex extraction in domain agents with structured LLM output (views, filters, aggregations, group-by)
-- **Why:** Regex patterns break on natural variation. "Show me our biggest customers in the western region last quarter" should work — and currently doesn't
-- **Approach:** Each domain agent sends the question + its view schemas to GPT-4 with a structured output schema (JSON mode). Return `QueryRequest` fields directly.
-- **Files:** `app/agents/domain/sales.py`, `app/agents/domain/finance.py`, `app/agents/domain/operations.py`, `app/agents/domain/base_domain.py`
-- **Effort:** Medium-Large
+#### 3.3 Confidence-Based Clarification ✅
+- **What:** Routing confidence below 0.4 returns a clarification response instead of guessing
+- **Applies to:** both `process_query()` and `process_query_with_trace()` — clarification responses are never cached
+- **Files:** `app/agents/orchestrator.py`, `app/api/routes/query.py`
 
-#### 3.3 Confidence-Based Clarification
-- **What:** When routing or interpretation confidence is below a threshold, ask the user to clarify instead of guessing
-- **Why:** Wrong answers erode trust faster than asking for help; currently defaults to Sales with low confidence
-- **Files:** `app/agents/orchestrator.py`, `app/api/routes/query.py`, `gradio_app.py`
-- **Effort:** Medium
+#### 3.4 Shared LLM Client Singleton ✅
+- **What:** One `ChatOpenAI` instance per process (not per request); `reset_llm_client()` for test injection
+- **Files:** `app/agents/llm_client.py`
 
-**Success Criteria:**
-- "How many employees do we have in the western warehouses?" correctly routes to Operations
-- "Show me our biggest customers by revenue in Q4" returns correct aggregated results
-- Ambiguous queries trigger a clarification prompt instead of a wrong answer
+**Test coverage:** 20 new tests in `tests/unit/test_llm_phase3.py` covering LLM routing, interpretation, clarification, and singleton behaviour.
 
 ---
 
@@ -631,7 +626,7 @@ This phase also completes the remaining original Phase 5 items: streaming, load 
 
 After each phase, verify with these steps:
 
-1. **Run full test suite:** `make test` — all 158+ tests must continue passing
+1. **Run full test suite:** `make test` — all 235+ tests must continue passing
 2. **Manual smoke test via Gradio:** Run sample queries from each domain at `http://localhost:7860`
 3. **API test:** Hit each endpoint via curl/httpie and verify response shape at `http://localhost:8000/docs`
 

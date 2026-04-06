@@ -90,11 +90,12 @@ Query → Route → Validate → Execute → Return Results
 
 **Responsibility**: Classify queries to appropriate domain
 
-**Algorithm**:
-1. Extract keywords from query (lowercased)
-2. Score each domain based on keyword matches
-3. View mentions weighted 2x higher than keywords
-4. Return domain with highest score + confidence
+**Algorithm** (LLM-first, keyword fallback):
+1. Call `get_llm()` to get the shared `ChatOpenAI` singleton
+2. If LLM available: send domain descriptions + query to GPT-4, parse JSON response `{domain, confidence, reasoning}`
+3. Clamp confidence to `[0.0, 1.0]`; reject unknown domain names → fall back to keyword scoring
+4. If LLM unavailable or returns unparseable output: keyword scoring (view mentions weighted 2×)
+5. Return domain with highest score + confidence
 
 **Domains**:
 - **Sales**: customers, products, regions, revenue
@@ -111,24 +112,41 @@ Query → Route → Validate → Execute → Return Results
 - `FinanceAgent` - Finance-specific query processing
 - `OperationsAgent` - Operations-specific query processing
 
-**Processing Pipeline** (each agent):
+**Processing Pipeline** (each agent — LLM-first, regex fallback):
 ```
 Natural Language Query
         ↓
-Identify Views (keyword matching)
-        ↓
-Identify Filters (regex patterns)
-        ↓
-Identify Aggregations (SUM, COUNT, AVG, etc.)
-        ↓
-Build QueryRequest
+Try LLM Interpretation (_try_llm_interpret)
+  • Send query + domain view schemas to GPT-4
+  • Parse JSON → QueryRequest (views, filters, aggregations, group_by)
+  • On API/parse failure → fall through to regex
+        ↓ (LLM success)
+Execute LLM QueryRequest
+  • On execution failure (e.g. hallucinated view) → fall through to regex
+        ↓ (LLM or execution failure)
+Regex Fallback
+  • Identify Views (keyword matching)
+  • Identify Filters (regex patterns)
+  • Identify Aggregations (SUM, COUNT, AVG, etc.)
+  • Build QueryRequest
         ↓
 Execute via Builder
         ↓
-Return Results with Confidence
+Return Results with Confidence + interpretation_method ("llm" | "regex")
 ```
 
-### 5. Query Validator (`app/query/validator.py`)
+### 5. LLM Client (`app/agents/llm_client.py`)
+
+**Responsibility**: Provide a single shared `ChatOpenAI` instance for the process
+
+**Design**:
+- Module-level singleton (`_client`, `_init_attempted`) — initialized once on first call
+- Returns `None` gracefully when `OPENAI_API_KEY` is not set or `langchain-openai` is not installed
+- `reset_llm_client()` resets state for test injection
+
+**Usage**: Both `RouterAgent` and `BaseDomainAgent` call `get_llm()` — they never instantiate `ChatOpenAI` directly, ensuring at most one connection per process.
+
+### 6. Query Validator (`app/query/validator.py`)
 
 **Responsibility**: Validate queries before execution
 
@@ -144,7 +162,7 @@ Return Results with Confidence
 - `estimate_result_size()` - Row count estimation
 - `get_validation_warnings()` - Non-blocking suggestions
 
-### 6. Query Builder (`app/query/builder.py`)
+### 7. Query Builder (`app/query/builder.py`)
 
 **Responsibility**: Generate SQL from QueryRequest
 
@@ -159,7 +177,7 @@ Return Results with Confidence
 - Handles one-to-one, one-to-many, many-to-one relationships
 - Prevents invalid many-to-many joins
 
-### 7. View Registry (`app/views/registry.py`)
+### 8. View Registry (`app/views/registry.py`)
 
 **Responsibility**: Centralized metadata about views
 
@@ -174,7 +192,7 @@ Return Results with Confidence
 - `find_joins(view1, view2)` - Find join path
 - `validate_view_combination(views)` - Check if views can be joined
 
-### 8. Database Connection (`app/database/connection.py`)
+### 9. Database Connection (`app/database/connection.py`)
 
 **Responsibility**: Safe database access
 
@@ -184,7 +202,7 @@ Return Results with Confidence
 - SQL injection prevention
 - Mock database support for testing
 
-### 9. Observability (`app/observability/`)
+### 10. Observability (`app/observability/`)
 
 **Components**:
 
@@ -209,12 +227,13 @@ Return Results with Confidence
    {"question": "How many sales were made?"}
 
 2. Orchestrator routes query
-   RouterAgent.route() → "sales" domain, confidence 0.95
+   RouterAgent.route() → GPT-4 classifies → "sales" domain, confidence 0.95
+   (fallback: keyword scoring if LLM unavailable)
 
-3. Domain agent processes
-   SalesAgent._identify_views() → ["sales_fact"]
-   SalesAgent._identify_filters() → {}
-   SalesAgent._identify_aggregations() → {"sale_id": "COUNT"}
+3. Domain agent processes (LLM path)
+   SalesAgent._try_llm_interpret() → GPT-4 returns QueryRequest JSON
+   selected_views=["sales_fact"], filters={}, aggregations={"sale_id": "COUNT"}
+   (fallback: regex _identify_views/_identify_filters/_identify_aggregations)
 
 4. Validator checks
    - sales_fact exists ✓
@@ -309,7 +328,7 @@ tests/
     └── mocks.py
 ```
 
-**Test Coverage**: 125 tests, all passing
+**Test Coverage**: 235+ tests, all passing
 
 ## Deployment Architecture
 
@@ -342,15 +361,14 @@ tests/
 
 ## Future Enhancements
 
-1. **Langchain Integration**: Use Langchain for more complex NLU
-2. **Langraph Workflows**: Multi-turn conversations and state management
-3. **Caching Layer**: Redis for result caching
-4. **Rate Limiting**: Per-user query limits
-5. **Audit Logging**: Track all queries for compliance
-6. **Multi-tenancy**: Support multiple organizations
-7. **Custom Domains**: User-defined domain agents
-8. **ML-based Routing**: Learn query patterns over time
+1. **Conversational Intelligence**: Multi-turn queries with session context (`app/agents/conversation_context.py` already written)
+2. **Langraph as Primary Orchestrator**: Promote graph-based workflow from fallback to primary path
+3. **Rate Limiting**: Per-user query limits (middleware stub exists)
+4. **Audit Logging**: Track all queries for compliance
+5. **Multi-tenancy**: Support multiple organizations with row-level security
+6. **Custom Domains**: User-defined domain agents without code changes
+7. **Complex SQL**: HAVING, window functions, CTEs, time intelligence
 
 ---
 
-**Last Updated**: 2026-03-19
+**Last Updated**: 2026-04-06

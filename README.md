@@ -114,13 +114,13 @@ meridian/
 ## Development Roadmap
 
 ### Phase 1: Foundation — ✅ COMPLETED
-View Registry, Sales/Finance/Operations agents, QueryBuilder, QueryValidator, REST API (6 endpoints), Gradio UI, Docker, 158+ tests.
+View Registry, Sales/Finance/Operations agents, QueryBuilder, QueryValidator, REST API (6 endpoints), Gradio UI, Docker.
 
-### Phase 2: Activate Scaffolded Features (Weeks 1–2)
-Wire Redis caching, pagination, rate limiting, OpenTelemetry tracing, and Langsmith integration — all code written, not yet connected.
+### Phase 2: Activate Scaffolded Features — ✅ COMPLETED
+Redis caching, pagination, rate limiting, OpenTelemetry tracing, and Langsmith integration wired and active.
 
-### Phase 3: LLM-Powered NL Understanding (Weeks 3–5)
-Replace regex-based routing and query parsing with GPT-4 classification and structured output. Confidence-based clarification.
+### Phase 3: LLM-Powered NL Understanding — ✅ COMPLETED
+GPT-4 domain routing and query interpretation with two-stage regex fallback. Confidence-based clarification (threshold 0.4). Shared LLM client singleton. 235+ tests.
 
 ### Phase 4: Conversational Intelligence (Weeks 6–8)
 Multi-turn conversations, query history, smart follow-up suggestions, LangGraph as primary orchestrator.
@@ -255,7 +255,7 @@ See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for cloud deployment (AWS, GCP, Azu
 
 ## Development Status
 
-- **Current Phase:** Phase 1 (Foundation) COMPLETE → Next: Phase 2 (Activate Scaffolded Features)
+- **Current Phase:** Phase 3 (LLM-Powered NL Understanding) COMPLETE → Next: Phase 4 (Conversational Intelligence)
 - **Version:** 0.2.0
 - **Python:** 3.11+
 - **License:** MIT
