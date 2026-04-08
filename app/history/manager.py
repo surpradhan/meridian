@@ -28,9 +28,13 @@ CREATE TABLE IF NOT EXISTS query_history (
     confidence  REAL,
     error       TEXT,
     conversation_id TEXT,
+    user_id     TEXT,
     created_at  TEXT NOT NULL
 );
 """
+
+# Migration: add user_id if table was created before Phase 5
+_MIGRATE_USER_ID_SQL = "ALTER TABLE query_history ADD COLUMN user_id TEXT"
 
 
 class HistoryManager:
@@ -55,6 +59,12 @@ class HistoryManager:
         with self._lock:
             self._conn.execute(_CREATE_TABLE_SQL)
             self._conn.commit()
+            # Migrate pre-Phase-5 databases that lack user_id
+            try:
+                self._conn.execute(_MIGRATE_USER_ID_SQL)
+                self._conn.commit()
+            except Exception:
+                pass  # Column already exists
 
     # ------------------------------------------------------------------
     # Public API
@@ -65,6 +75,7 @@ class HistoryManager:
         question: str,
         result: Dict[str, Any],
         conversation_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> str:
         """Persist a completed query and return its history ID."""
         history_id = str(uuid.uuid4())
@@ -83,8 +94,8 @@ class HistoryManager:
                     """
                     INSERT INTO query_history
                         (id, question, domain, sql, row_count, confidence,
-                         error, conversation_id, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         error, conversation_id, user_id, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         history_id,
@@ -95,6 +106,7 @@ class HistoryManager:
                         result.get("confidence"),
                         result.get("error"),
                         conversation_id,
+                        user_id,
                         now,
                     ),
                 )
@@ -105,14 +117,23 @@ class HistoryManager:
 
         return history_id
 
-    def list(self, limit: int = 50) -> List[Dict[str, Any]]:
-        """Return the most recent queries, newest first."""
+    def list(self, limit: int = 50, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Return the most recent queries, newest first.
+
+        If user_id is provided, only return entries for that user.
+        """
         try:
             with self._lock:
-                rows = self._conn.execute(
-                    "SELECT * FROM query_history ORDER BY created_at DESC LIMIT ?",
-                    (limit,),
-                ).fetchall()
+                if user_id is not None:
+                    rows = self._conn.execute(
+                        "SELECT * FROM query_history WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
+                        (user_id, limit),
+                    ).fetchall()
+                else:
+                    rows = self._conn.execute(
+                        "SELECT * FROM query_history ORDER BY created_at DESC LIMIT ?",
+                        (limit,),
+                    ).fetchall()
             return [dict(r) for r in rows]
         except Exception as e:
             logger.warning(f"HistoryManager.list failed: {e}")

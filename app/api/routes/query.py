@@ -6,9 +6,12 @@ REST endpoints for submitting and processing natural language queries.
 
 import logging
 from typing import Dict, Any, Optional
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from app.auth.dependencies import get_current_user
+from app.auth.permissions import mask_sensitive_fields
+from app.auth.store import User
 from app.query.pagination import Paginator
 
 logger = logging.getLogger(__name__)
@@ -109,7 +112,10 @@ class QueryResponse(BaseModel):
 
 
 @router.post("/execute", response_model=QueryResponse)
-async def execute_query(request: QueryRequest) -> Dict[str, Any]:
+async def execute_query(
+    request: QueryRequest,
+    current_user: User = Depends(get_current_user),
+) -> Dict[str, Any]:
     """
     Execute a natural language query using multi-agent orchestration.
 
@@ -125,7 +131,13 @@ async def execute_query(request: QueryRequest) -> Dict[str, Any]:
     Raises:
         HTTPException: If query execution fails
     """
-    logger.info(f"Query received: {request.question}")
+    logger.info(f"Query received from {current_user.username}: {request.question}")
+
+    if not current_user.can_execute_queries():
+        raise HTTPException(
+            status_code=403,
+            detail="Your role does not permit query execution. Contact an admin.",
+        )
 
     try:
         # Import here to avoid circular imports
@@ -163,6 +175,14 @@ async def execute_query(request: QueryRequest) -> Dict[str, Any]:
                 request.question, conversation_id=request.conversation_id
             )
 
+        # Domain access check — verify user is allowed into the routed domain
+        routed_domain = result.get("domain", "")
+        if routed_domain and not current_user.can_access_domain(routed_domain):
+            raise HTTPException(
+                status_code=403,
+                detail=f"Access to domain '{routed_domain}' is not permitted for your account",
+            )
+
         # Check for errors
         if "error" in result:
             error_response = {
@@ -191,6 +211,10 @@ async def execute_query(request: QueryRequest) -> Dict[str, Any]:
             result["page_row_count"] = len(paginated.rows)
             result["pagination"] = paginated.to_dict()["pagination"]
 
+        # Mask sensitive fields based on user role
+        if "result" in result:
+            result["result"] = mask_sensitive_fields(result["result"], current_user.role)
+
         return result
 
     except HTTPException:
@@ -201,7 +225,10 @@ async def execute_query(request: QueryRequest) -> Dict[str, Any]:
 
 
 @router.post("/validate")
-async def validate_query(request: QueryRequest) -> Dict[str, Any]:
+async def validate_query(
+    request: QueryRequest,
+    current_user: User = Depends(get_current_user),
+) -> Dict[str, Any]:
     """
     Validate a query without executing it.
 
@@ -247,7 +274,7 @@ async def validate_query(request: QueryRequest) -> Dict[str, Any]:
 
 
 @router.get("/domains")
-async def list_domains() -> Dict[str, Any]:
+async def list_domains(current_user: User = Depends(get_current_user)) -> Dict[str, Any]:
     """
     List all available domains and their capabilities.
 
@@ -280,7 +307,10 @@ async def list_domains() -> Dict[str, Any]:
 
 
 @router.get("/explore")
-async def explore_domain(domain: str = Query("sales", description="Domain to explore")) -> Dict[str, Any]:
+async def explore_domain(
+    domain: str = Query("sales", description="Domain to explore"),
+    current_user: User = Depends(get_current_user),
+) -> Dict[str, Any]:
     """
     Explore available views and metadata in a domain.
 
@@ -293,6 +323,12 @@ async def explore_domain(domain: str = Query("sales", description="Domain to exp
         Dict with domain metadata and suggestions
     """
     logger.info(f"Exploring domain: {domain}")
+
+    if not current_user.can_access_domain(domain):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Access to domain '{domain}' is not permitted for your account",
+        )
 
     try:
         from app.views.registry import get_registry

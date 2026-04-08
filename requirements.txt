@@ -31,3 +31,7 @@ python-dotenv==1.0.0
 
 # Logging
 python-json-logger==2.0.7
+
+# Authentication & Security
+python-jose[cryptography]==3.3.0
+bcrypt>=4.0.0

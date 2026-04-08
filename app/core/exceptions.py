@@ -54,3 +54,17 @@ class ViewRegistryError(MeridianException):
 
     def __init__(self, message: str):
         super().__init__(message, "VIEW_REGISTRY_ERROR")
+
+
+class AuthenticationError(MeridianException):
+    """Raised when authentication fails (invalid/missing credentials)."""
+
+    def __init__(self, message: str = "Authentication required"):
+        super().__init__(message, "AUTHENTICATION_ERROR")
+
+
+class AuthorizationError(MeridianException):
+    """Raised when a user lacks permission for a resource."""
+
+    def __init__(self, message: str = "Insufficient permissions"):
+        super().__init__(message, "AUTHORIZATION_ERROR")

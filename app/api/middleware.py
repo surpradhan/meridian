@@ -13,7 +13,7 @@ from typing import Dict, List, Optional
 from fastapi import FastAPI
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, RedirectResponse
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +118,109 @@ class ConcurrentRequestMiddleware(BaseHTTPMiddleware):
             self._semaphore.release()
 
 
+class HTTPSRedirectMiddleware(BaseHTTPMiddleware):
+    """Redirect HTTP to HTTPS when enforce_https=True in production."""
+
+    async def dispatch(self, request: Request, call_next):
+        try:
+            from app.config import settings
+            if (
+                settings.enforce_https
+                and settings.is_production()
+                and request.url.scheme == "http"
+            ):
+                https_url = str(request.url).replace("http://", "https://", 1)
+                return RedirectResponse(url=https_url, status_code=301)
+        except Exception:
+            pass
+        return await call_next(request)
+
+
+def _semantic_action(method: str, path: str) -> str:
+    """Map an HTTP method + path to a short semantic action string.
+
+    Path parameters (UUIDs, arbitrary IDs) are normalised to {id} so that
+    audit queries like "all history deletes" work without wildcards.
+    """
+    import re
+    # Normalise any UUID-like segment to {id}
+    clean = re.sub(r"/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", "/{id}", path)
+    # Also normalise any remaining path segment that looks like a raw ID
+    clean = re.sub(r"/[0-9a-f-]{10,}", "/{id}", clean)
+
+    _MAP: Dict[tuple, str] = {
+        ("POST",   "/api/auth/login"):        "auth.login",
+        ("POST",   "/api/auth/register"):     "auth.register",
+        ("GET",    "/api/auth/me"):           "auth.me",
+        ("POST",   "/api/query/execute"):     "query.execute",
+        ("POST",   "/api/query/validate"):    "query.validate",
+        ("GET",    "/api/query/domains"):     "query.domains",
+        ("GET",    "/api/query/explore"):     "query.explore",
+        ("GET",    "/api/history"):           "history.list",
+        ("GET",    "/api/history/{id}"):      "history.get",
+        ("DELETE", "/api/history/{id}"):      "history.delete",
+    }
+    return _MAP.get((method, clean), f"{method.lower()}:{path}")
+
+
+class AuditLogMiddleware(BaseHTTPMiddleware):
+    """Write an audit log entry for every request after it completes.
+
+    Extracts the authenticated user from the JWT (if present) without
+    raising — unauthenticated requests are logged as anonymous.
+    """
+
+    # Paths that don't need audit entries (health probes, static assets)
+    _SKIP_PATHS = {"/health", "/api/query/health", "/", "/docs", "/redoc", "/openapi.json"}
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+
+        if request.url.path in self._SKIP_PATHS:
+            return response
+
+        try:
+            from app.config import settings
+            if not settings.audit_log_enabled:
+                return response
+        except Exception:
+            return response
+
+        # Best-effort user extraction from Bearer token
+        user_id: Optional[str] = None
+        username: Optional[str] = None
+        try:
+            auth_header = request.headers.get("Authorization", "")
+            if auth_header.startswith("Bearer "):
+                from app.auth.jwt import decode_access_token
+                payload = decode_access_token(auth_header[7:])
+                if payload:
+                    user_id = payload.get("sub")
+                    username = payload.get("username")
+        except Exception:
+            pass
+
+        method = request.method
+        path = request.url.path
+        action = _semantic_action(method, path)
+        client_ip = request.client.host if request.client else "unknown"
+
+        try:
+            from app.auth.store import get_auth_store
+            get_auth_store().log_audit(
+                action=action,
+                resource=path,
+                user_id=user_id,
+                username=username,
+                status_code=response.status_code,
+                client_ip=client_ip,
+            )
+        except Exception as exc:
+            logger.warning(f"AuditLogMiddleware: write failed — audit trail may be incomplete: {exc}")
+
+        return response
+
+
 def setup_middleware(app: FastAPI) -> None:
     """Setup request logging, rate limiting, and concurrency middleware.
 
@@ -134,6 +237,8 @@ def setup_middleware(app: FastAPI) -> None:
 
     app.add_middleware(ConcurrentRequestMiddleware, max_concurrent=max_concurrent)
     app.add_middleware(RateLimitMiddleware, requests_per_minute=rate_limit)
+    app.add_middleware(AuditLogMiddleware)
+    app.add_middleware(HTTPSRedirectMiddleware)
     app.add_middleware(RequestLoggingMiddleware)
 
     logger.info(

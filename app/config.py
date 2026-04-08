@@ -5,9 +5,12 @@ Handles environment-based configuration using Pydantic Settings.
 Supports .env files and environment variables.
 """
 
-from typing import Literal
+import os
+import secrets
+import warnings
+from typing import List, Literal
 from pydantic_settings import BaseSettings
-from pydantic import Field
+from pydantic import Field, model_validator
 
 
 class Settings(BaseSettings):
@@ -60,10 +63,56 @@ class Settings(BaseSettings):
     jaeger_agent_host: str = Field(default="localhost", description="Jaeger agent host")
     jaeger_agent_port: int = Field(default=6831, description="Jaeger agent port")
 
+    # Security / Authentication
+    secret_key: str = Field(
+        default_factory=lambda: secrets.token_hex(32),
+        description="JWT signing secret key (set via SECRET_KEY env var in production)",
+    )
+    jwt_algorithm: str = Field(default="HS256", description="JWT signing algorithm")
+    jwt_expiration_hours: int = Field(default=24, description="JWT token expiry in hours")
+    cors_origins: List[str] = Field(
+        default=["http://localhost:3000", "http://localhost:7860", "http://localhost:8000"],
+        description="Allowed CORS origins",
+    )
+    enforce_https: bool = Field(default=False, description="Redirect HTTP to HTTPS in production")
+    audit_log_enabled: bool = Field(default=True, description="Enable audit logging")
+
     class Config:
         env_file = [".env", ".env.local"]
         env_file_encoding = "utf-8"
         case_sensitive = False
+
+    @model_validator(mode="after")
+    def validate_production_security(self) -> "Settings":
+        """Catch dangerous misconfigurations before the app starts."""
+        if self.environment != "production":
+            return self
+
+        # Secret key must be explicitly set — the random default rotates every restart
+        if "SECRET_KEY" not in os.environ:
+            warnings.warn(
+                "SECRET_KEY is not set via environment variable. "
+                "All JWT tokens will be invalidated on every restart. "
+                "Set SECRET_KEY in production!",
+                stacklevel=2,
+            )
+
+        # Debug mode leaks stack traces in API error responses
+        if self.debug:
+            raise ValueError(
+                "debug=True is not allowed in production. Set DEBUG=false (or omit it)."
+            )
+
+        # Warn if CORS origins still point at localhost
+        _dev_origins = {"http://localhost:3000", "http://localhost:7860", "http://localhost:8000"}
+        if set(self.cors_origins) == _dev_origins:
+            warnings.warn(
+                "CORS_ORIGINS is still set to development localhost defaults in production. "
+                "Set CORS_ORIGINS to your actual frontend origin(s).",
+                stacklevel=2,
+            )
+
+        return self
 
     def is_production(self) -> bool:
         """Check if running in production."""

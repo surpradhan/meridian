@@ -31,13 +31,13 @@ app = FastAPI(
     debug=settings.debug,
 )
 
-# Add CORS middleware
+# Add CORS middleware — origins configured via CORS_ORIGINS env var
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure for production
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 # Setup additional middleware (auth, logging, etc)
@@ -55,7 +55,9 @@ tracing.instrument_app(app)
 # Register API routes
 from app.api.routes import query as query_routes
 from app.api.routes import history as history_routes
+from app.auth import routes as auth_routes
 
+app.include_router(auth_routes.router)
 app.include_router(query_routes.router)
 app.include_router(history_routes.router)
 
