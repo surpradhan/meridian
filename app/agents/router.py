@@ -10,7 +10,7 @@ import logging
 import re
 from typing import Literal, Tuple
 from app.views.registry import ViewRegistry
-from app.agents.llm_client import get_llm
+from app.agents.llm_client import get_llm, invoke_llm_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +136,7 @@ class RouterAgent:
     ) -> Tuple[Literal["sales", "finance", "operations"], float]:
         """Classify the query domain using GPT-4."""
         prompt = _build_route_prompt(query)
-        response = llm.invoke(prompt)  # type: ignore[union-attr]
+        response = invoke_llm_with_retry(llm, prompt)
         content = response.content if hasattr(response, "content") else str(response)
 
         # Extract JSON — handle markdown code fences if present
