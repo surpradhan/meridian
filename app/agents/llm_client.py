@@ -4,12 +4,72 @@ Shared LLM Client
 Module-level singleton for the ChatOpenAI client so all agents and the
 router share one HTTP connection pool rather than creating a new client
 per agent per request.
+
+Also exposes `invoke_llm_with_retry` — a tenacity-backed wrapper that
+retries on transient API errors (rate limits, timeouts, connection drops)
+but NOT on non-transient errors (auth failures, bad requests, programming
+errors), avoiding pointless retries that just add latency.
 """
 
 import logging
-from typing import Optional
+from typing import Optional, Tuple, Type
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Tenacity retry helpers
+# ---------------------------------------------------------------------------
+
+try:
+    from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+    TENACITY_AVAILABLE = True
+except ImportError:
+    TENACITY_AVAILABLE = False
+
+    def retry(*args, **kwargs):  # type: ignore[misc]
+        def decorator(func):
+            return func
+        return decorator
+
+    def stop_after_attempt(n):  # type: ignore[misc]
+        return None
+
+    def wait_exponential(**kwargs):  # type: ignore[misc]
+        return None
+
+    def retry_if_exception_type(exc):  # type: ignore[misc]
+        return None
+
+# Transient OpenAI/LangChain errors worth retrying.
+# Non-transient errors (AuthenticationError, InvalidRequestError, etc.) are
+# intentionally excluded — retrying them wastes time and always fails.
+try:
+    import openai as _openai
+    _TRANSIENT_LLM_ERRORS: Tuple[Type[Exception], ...] = (
+        _openai.RateLimitError,
+        _openai.APITimeoutError,
+        _openai.APIConnectionError,
+        _openai.InternalServerError,
+    )
+except (ImportError, AttributeError):
+    # openai not installed (e.g. test environments) — fall back to stdlib equivalents
+    _TRANSIENT_LLM_ERRORS = (ConnectionError, TimeoutError, OSError)
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception_type(_TRANSIENT_LLM_ERRORS),
+    reraise=True,
+)
+def invoke_llm_with_retry(llm, prompt: str):
+    """Invoke an LLM with exponential-backoff retry for transient API failures.
+
+    Retries up to 3 times on rate limits, timeouts, and connection errors.
+    Reraises immediately on auth failures, invalid requests, and all other
+    non-transient exceptions so callers can fall back without wasted delay.
+    """
+    return llm.invoke(prompt)  # type: ignore[union-attr]
 
 _client: Optional[object] = None
 _init_attempted: bool = False
