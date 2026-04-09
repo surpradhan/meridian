@@ -375,15 +375,22 @@ class TestLLMRetry:
     @pytest.mark.skipif(not TENACITY_AVAILABLE, reason="tenacity not installed")
     def test_reraises_after_all_retries_exhausted(self):
         """After 3 failed attempts, the last transient error is reraised."""
+        from tenacity import wait_none
         from app.agents.llm_client import invoke_llm_with_retry, _TRANSIENT_LLM_ERRORS
         llm = MagicMock()
         err = _TRANSIENT_LLM_ERRORS[0]("always fails")
         llm.invoke.side_effect = err
 
-        with pytest.raises(_TRANSIENT_LLM_ERRORS[0]):
-            invoke_llm_with_retry(llm, "hello")
+        # Eliminate exponential-backoff waits so this test doesn't block CI for ~6 s.
+        invoke_llm_with_retry.retry.wait = wait_none()
+        try:
+            with pytest.raises(_TRANSIENT_LLM_ERRORS[0]):
+                invoke_llm_with_retry(llm, "hello")
 
-        assert llm.invoke.call_count == 3
+            assert llm.invoke.call_count == 3
+        finally:
+            from tenacity import wait_exponential
+            invoke_llm_with_retry.retry.wait = wait_exponential(multiplier=1, min=2, max=10)
 
     def test_base_domain_falls_back_to_none_on_retry_exhaustion(self):
         """_try_llm_interpret returns None when invoke_llm_with_retry raises."""

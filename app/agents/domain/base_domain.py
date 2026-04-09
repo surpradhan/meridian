@@ -16,28 +16,6 @@ from app.query.builder import QueryBuilder
 from app.database.connection import DbConnection
 from app.agents.llm_client import get_llm, invoke_llm_with_retry
 
-try:
-    from tenacity import (
-        retry,
-        stop_after_attempt,
-        wait_exponential,
-        retry_if_exception_type,
-    )
-except ImportError:
-    def retry(*args, **kwargs):  # type: ignore[misc]
-        def decorator(func):
-            return func
-        return decorator
-
-    def stop_after_attempt(n):  # type: ignore[misc]
-        return None
-
-    def wait_exponential(**kwargs):  # type: ignore[misc]
-        return None
-
-    def retry_if_exception_type(exc):  # type: ignore[misc]
-        return None
-
 logger = logging.getLogger(__name__)
 
 
