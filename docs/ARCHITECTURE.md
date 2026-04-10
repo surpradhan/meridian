@@ -206,18 +206,47 @@ Return Results with Confidence + interpretation_method ("llm" | "regex")
 
 ### 7. Query Builder (`app/query/builder.py`)
 
-**Responsibility**: Generate SQL from QueryRequest
+**Responsibility**: Generate parameterized SQL from QueryRequest
 
 **Features**:
-- `build_query()` - Full SQL generation
-- `_build_from_clause()` - Smart JOIN generation
-- Column suggestion
-- Aggregation suggestion
+- `build_query_parameterized()` → `(sql, params)` — production path; all user values as `?` placeholders
+- `build_query()` — backward-compatible string API (calls `build_query_parameterized` internally)
+- `_build_from_clause()` — Smart JOIN generation with multi-hop BFS via `ViewRegistry.find_join_path`
+- `_build_where_clause_parameterized()` — parameterized WHERE, COLLATE NOCASE on strings
+- `_build_having_clause_parameterized()` — HAVING with `_SAFE_HAVING_OPS` whitelist, numeric values only
+- `_render_window_function()` — OVER (PARTITION BY … ORDER BY …) clause generation
+- `_apply_time_expression()` — delegates to `time_intelligence.py`, validates `time_column` against registry
 
 **Smart JOINs**:
 - Automatically detects join paths using registry
 - Handles one-to-one, one-to-many, many-to-one relationships
+- Multi-hop: injects intermediate bridge views via BFS (`find_join_path`)
 - Prevents invalid many-to-many joins
+
+### 7a. Time Intelligence (`app/query/time_intelligence.py`)
+
+**Responsibility**: Resolve natural-language temporal expressions into concrete ISO date ranges
+
+**Supported expressions**: `last_quarter`, `this_quarter`, `last_month`, `this_month`, `ytd`/`year_to_date`, `last_year`, `trailing_N_days`
+
+**Key Functions**:
+- `resolve_time_expression(expression, reference_date?)` → `(start_date, end_date)` or `None`
+- `build_date_filters(expression, date_column, reference_date?)` → filter dict with `__gte__` / `__lte__` keys
+- `detect_time_expression(text)` → extract expression from free text
+
+**Integration**: `QueryBuilder._apply_time_expression()` validates `time_column` against registered view columns, then calls `build_date_filters()` and adds results as parameterized WHERE conditions.
+
+### 7b. Visualization Hints (`app/visualization/chart_selector.py`)
+
+**Responsibility**: Infer chart type from query result shape
+
+**Chart selection heuristics**:
+- **line**: result has a date/time column + one numeric column (time series)
+- **pie**: ≤ 8 rows, exactly one string column + one numeric column (proportional)
+- **bar**: ≥ 2 rows with string group + numeric aggregate
+- **table**: fallback for any other shape
+
+**Integration**: `Orchestrator._build_visualization_hint()` is called after every query; result dict gains a `visualization` key: `{chart_type, x_axis, y_axis, reason}`.
 
 ### 8. View Registry (`app/views/registry.py`)
 
@@ -231,7 +260,9 @@ Return Results with Confidence + interpretation_method ("llm" | "regex")
 
 **Key Methods**:
 - `get_view(name)` - Get view metadata
-- `find_joins(view1, view2)` - Find join path
+- `find_joins(view1, view2)` - Direct join lookup
+- `find_join_path(from_view, to_view)` - BFS shortest join path (multi-hop)
+- `get_reachable_views(start_view)` - BFS connectivity set
 - `validate_view_combination(views)` - Check if views can be joined
 
 ### 9. Database Connection (`app/database/connection.py`)
@@ -363,11 +394,12 @@ tests/
 ├── unit/                        # Fast, isolated tests
 │   ├── test_views.py            # View registry (35 tests)
 │   ├── test_llm_phase3.py       # LLM routing + interpretation (20 tests)
-│   └── test_phase4.py           # Conversational Intelligence (50 tests)
+│   ├── test_phase4.py           # Conversational Intelligence (50 tests)
+│   └── test_phase6.py           # Advanced Query Capabilities (65 tests)
 ├── integration/                 # Multi-component tests
 │   ├── test_agents.py
 │   ├── test_advanced_features.py
-│   ├── test_history_api.py      # History REST API (12 tests)
+│   ├── test_history_api.py      # History REST API (12 tests — pre-existing failures)
 │   ├── test_orchestrator.py
 │   ├── test_phase3_phase4.py
 │   ├── test_ui_queries.py
@@ -377,9 +409,7 @@ tests/
     └── mocks.py
 ```
 
-**Total: 297 tests passing**
-
-**Test Coverage**: 235+ tests, all passing
+**Total: 441+ tests (429 passing; 12 pre-existing `test_history_api.py` failures unrelated to query logic)**
 
 ## Deployment Architecture
 
@@ -412,14 +442,14 @@ tests/
 
 ## Future Enhancements
 
-1. **Conversational Intelligence**: Multi-turn queries with session context (`app/agents/conversation_context.py` already written)
-2. **Langraph as Primary Orchestrator**: Promote graph-based workflow from fallback to primary path
-3. **Rate Limiting**: Per-user query limits (middleware stub exists)
-4. **Audit Logging**: Track all queries for compliance
-5. **Multi-tenancy**: Support multiple organizations with row-level security
-6. **Custom Domains**: User-defined domain agents without code changes
-7. **Complex SQL**: HAVING, window functions, CTEs, time intelligence
+1. **Rate Limiting**: Per-user query limits (middleware stub exists) — Phase 7
+2. **Audit Logging**: Track all queries for compliance — Phase 7
+3. **Multi-tenancy**: Support multiple organizations with row-level security — Phase 7
+4. **Custom Domains**: User-defined domain agents without code changes — Phase 7
+5. **Plotly Visualization**: Wire `visualization` hint from orchestrator result into Gradio chart rendering — Phase 7
+6. **Streaming Responses**: Real-time token output for long LLM calls — Phase 7
+7. **Async Query Execution**: Background jobs for long-running queries — Phase 7
 
 ---
 
-**Last Updated**: 2026-04-06
+**Last Updated**: 2026-04-09

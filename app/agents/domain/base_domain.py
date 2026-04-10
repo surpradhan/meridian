@@ -14,7 +14,14 @@ from app.views.models import QueryRequest
 from app.views.registry import ViewRegistry
 from app.query.builder import QueryBuilder
 from app.database.connection import DbConnection
-from app.agents.llm_client import get_llm, invoke_llm_with_retry
+from app.agents.llm_client import (
+    get_llm,
+    invoke_llm_with_retry,
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,12 +50,24 @@ def _build_interpret_prompt(
         '  "selected_views": list of view names from the schema to use (fact tables first)\n'
         '  "filters": dict mapping column_name to value for WHERE filters (empty dict if none)\n'
         '  "aggregations": dict mapping column_name to function (SUM|COUNT|AVG|MIN|MAX) (empty dict if none)\n'
-        '  "group_by": list of column names for GROUP BY (empty list if none)\n\n'
+        '  "group_by": list of column names for GROUP BY (empty list if none)\n'
+        '  "having": dict of HAVING conditions — key is "<AGG>_<column>" (e.g. "SUM_amount"), '
+        'value is {"op": ">", "value": 1000} (empty dict if none)\n'
+        '  "order_by": list of {"column": "<name or alias>", "direction": "ASC"|"DESC"} (empty list if none)\n'
+        '  "window_functions": list of window function specs — each has '
+        '{"alias": "<name>", "function": "<ROW_NUMBER|RANK|DENSE_RANK|SUM|AVG>", '
+        '"partition_by": [<columns>], "order_by": [{"column": ..., "direction": ...}]} '
+        '(empty list if none)\n'
+        '  "time_expression": temporal expression if present in the query, e.g. '
+        '"last_quarter", "ytd", "last_month", "trailing_30_days", "last_year" (null if none)\n'
+        '  "time_column": column name to apply the time_expression filter to (null if no time_expression)\n\n'
         "Rules:\n"
         "- Only use view names and column names that appear in the schema above\n"
         "- At least one view must be selected\n"
         "- Extract exact string values from the query for filters (preserve case of proper nouns)\n"
-        "- Fact tables (names ending in _fact) must appear before dimension tables in selected_views"
+        "- Fact tables (names ending in _fact) must appear before dimension tables in selected_views\n"
+        "- Use window functions for 'top N', 'ranked by', 'running total' queries\n"
+        "- Use time_expression for relative date references ('last quarter', 'this year', etc.)"
         + (
             "\n- Use conversation context to resolve pronouns or references to prior results"
             if context_summary and context_summary != "No previous context."
@@ -151,11 +170,27 @@ class BaseDomainAgent(ABC):
             if not selected_views:
                 raise ValueError("LLM returned empty selected_views")
 
+            from app.views.models import WindowFunction, CTEDefinition
+
+            raw_wfs = parsed.get("window_functions") or []
+            window_functions = None
+            if raw_wfs:
+                try:
+                    window_functions = [WindowFunction(**wf) for wf in raw_wfs]
+                except Exception as wf_err:
+                    logger.warning(f"Could not parse window_functions: {wf_err}")
+                    window_functions = None
+
             request = QueryRequest(
                 selected_views=selected_views,
                 filters=parsed.get("filters") or None,
                 aggregations=parsed.get("aggregations") or None,
                 group_by=parsed.get("group_by") or None,
+                having=parsed.get("having") or None,
+                order_by=parsed.get("order_by") or None,
+                window_functions=window_functions,
+                time_expression=parsed.get("time_expression") or None,
+                time_column=parsed.get("time_column") or None,
                 limit=100,
             )
             logger.info(
@@ -281,12 +316,12 @@ class BaseDomainAgent(ABC):
         if not is_valid:
             raise ValueError(f"Invalid view combination: {msg}")
 
-        # Build SQL query
-        sql = self.builder.build_query(request)
-        logger.info(f"Executing query: {sql}")
+        # Build parameterized SQL query (prevents SQL injection)
+        sql, params = self.builder.build_query_parameterized(request)
+        logger.info(f"Executing query: {sql}  params={params}")
 
-        # Execute query
-        results = self.db.execute_query(sql)
+        # Execute query with bound parameters
+        results = self.db.execute_query(sql, params if params else None)
 
         return {
             "result": results,
@@ -323,26 +358,20 @@ class BaseDomainAgent(ABC):
 
     def get_join_paths(self, from_view: str, to_view: str) -> Optional[List[str]]:
         """
-        Find a path of views connecting two views via joins.
+        Find the shortest join path between two views (single-hop or multi-hop).
+
+        Delegates to ``ViewRegistry.find_join_path`` which uses BFS over the
+        registered join relationships.
 
         Args:
             from_view: Starting view name
             to_view: Target view name
 
         Returns:
-            List of view names in the path, or None if not connected
+            Ordered list of view names from ``from_view`` to ``to_view``,
+            or None if no path exists.
         """
-        reachable = self.registry.get_reachable_views(from_view)
-
-        if to_view not in reachable:
-            return None
-
-        # Simple path: direct join if it exists
-        if self.registry.find_joins(from_view, to_view):
-            return [from_view, to_view]
-
-        # TODO: Implement full path-finding algorithm for multi-hop joins
-        return None
+        return self.registry.find_join_path(from_view, to_view)
 
     def __repr__(self) -> str:
         """String representation of agent."""

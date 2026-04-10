@@ -9,7 +9,7 @@ understand the data landscape and construct safe queries.
 """
 
 from typing import List, Optional, Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 
 
 class ColumnSchema(BaseModel):
@@ -246,6 +246,66 @@ class JoinRelationship(BaseModel):
         return " AND ".join(conditions)
 
 
+_VALID_WINDOW_FUNCTIONS = {
+    "ROW_NUMBER", "RANK", "DENSE_RANK",
+    "LAG", "LEAD",
+    "SUM", "AVG", "COUNT", "MIN", "MAX",
+    "FIRST_VALUE", "LAST_VALUE", "NTH_VALUE",
+    "NTILE", "CUME_DIST", "PERCENT_RANK",
+}
+
+
+class OrderByItem(BaseModel):
+    """A single ORDER BY column + direction specification."""
+
+    column: str = Field(..., min_length=1, description="Column name to order by")
+    direction: Literal["ASC", "DESC"] = Field(default="ASC", description="Sort direction")
+
+
+class WindowFunction(BaseModel):
+    """
+    Defines a window function to include in the SELECT clause.
+
+    Attributes:
+        alias: Column alias for the window function result
+        function: Window function name — must be one of the supported SQL window functions
+        partition_by: Columns to partition by (PARTITION BY clause)
+        order_by: Columns + direction for ORDER BY inside the window
+    """
+
+    alias: str = Field(..., min_length=1, description="Alias for the computed column")
+    function: str = Field(..., description="Window function (ROW_NUMBER, RANK, SUM, etc.)")
+    partition_by: Optional[List[str]] = Field(default=None, description="PARTITION BY columns")
+    order_by: Optional[List[OrderByItem]] = Field(
+        default=None,
+        description="ORDER BY inside window",
+    )
+
+    @validator("function")
+    @classmethod
+    def function_must_be_valid(cls, v: str) -> str:
+        normalised = v.strip().upper()
+        if normalised not in _VALID_WINDOW_FUNCTIONS:
+            raise ValueError(
+                f"Invalid window function '{v}'. "
+                f"Must be one of: {', '.join(sorted(_VALID_WINDOW_FUNCTIONS))}"
+            )
+        return normalised
+
+
+class CTEDefinition(BaseModel):
+    """
+    A Common Table Expression (WITH clause) definition.
+
+    Attributes:
+        name: CTE name used in the main query
+        sql: Raw SQL for the CTE body (SELECT ...)
+    """
+
+    name: str = Field(..., description="CTE name referenced in the main query")
+    sql: str = Field(..., description="SQL body for the CTE (without the name AS ( ) wrapper)")
+
+
 class QueryRequest(BaseModel):
     """
     Represents a request to query one or more views.
@@ -257,6 +317,13 @@ class QueryRequest(BaseModel):
         filters: Optional dict of column filters (WHERE clauses)
         limit: Maximum number of rows to return
         aggregations: Optional dict of column aggregations (SUM, COUNT, etc.)
+        group_by: Columns to GROUP BY
+        having: Aggregate filters (HAVING clause), keyed by "AGG_column"
+        order_by: ORDER BY columns and directions
+        window_functions: Window functions to add to the SELECT clause
+        ctes: Common Table Expressions (WITH clauses)
+        time_expression: Temporal expression to resolve (e.g. "last_quarter")
+        time_column: Column to apply the time_expression filter to
     """
 
     selected_views: List[str] = Field(
@@ -281,15 +348,56 @@ class QueryRequest(BaseModel):
         default=None,
         description="Columns to group by",
     )
+    having: Optional[dict] = Field(
+        default=None,
+        description=(
+            "HAVING conditions on aggregated columns. "
+            "Keys are '<AGG>_<column>' (e.g. 'SUM_amount'), "
+            "values are dicts with 'op' (e.g. '>') and 'value'."
+        ),
+    )
+    order_by: Optional[List[OrderByItem]] = Field(
+        default=None,
+        description="ORDER BY columns and directions",
+    )
+    window_functions: Optional[List[WindowFunction]] = Field(
+        default=None,
+        description="Window functions to add to the SELECT clause",
+    )
+    ctes: Optional[List[CTEDefinition]] = Field(
+        default=None,
+        description="Common Table Expressions (WITH clauses) prepended to the query",
+    )
+    time_expression: Optional[str] = Field(
+        default=None,
+        description="Temporal expression to resolve (e.g. 'last_quarter', 'ytd', 'trailing_30_days')",
+    )
+    time_column: Optional[str] = Field(
+        default=None,
+        description="Column name to apply the time_expression filter to (e.g. 'date', 'sale_date')",
+    )
 
     class Config:
         """Pydantic configuration."""
         json_schema_extra = {
             "example": {
                 "selected_views": ["sales_fact", "customer_dim"],
-                "filters": {"region": "WEST", "date_year": 2024},
+                "filters": {"region": "WEST"},
                 "limit": 100,
                 "aggregations": {"amount": "SUM"},
                 "group_by": ["region"],
+                "having": {"SUM_amount": {"op": ">", "value": 10000}},
+                "order_by": [{"column": "SUM_amount", "direction": "DESC"}],
+                "window_functions": [
+                    {
+                        "alias": "rank",
+                        "function": "ROW_NUMBER",
+                        "partition_by": ["region"],
+                        "order_by": [{"column": "amount", "direction": "DESC"}],
+                    }
+                ],
+                "ctes": [{"name": "top_customers", "sql": "SELECT customer_id FROM sales_fact GROUP BY customer_id ORDER BY SUM(amount) DESC LIMIT 5"}],
+                "time_expression": "last_quarter",
+                "time_column": "date",
             }
         }
