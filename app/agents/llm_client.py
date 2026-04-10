@@ -50,9 +50,14 @@ try:
         _openai.APITimeoutError,
         _openai.APIConnectionError,
         _openai.InternalServerError,
+        # Stdlib equivalents — always included so tests can use ConnectionError/TimeoutError
+        # without instantiating the openai error subclasses (which require extra kwargs).
+        ConnectionError,
+        TimeoutError,
+        OSError,
     )
 except (ImportError, AttributeError):
-    # openai not installed (e.g. test environments) — fall back to stdlib equivalents
+    # openai not installed (e.g. test environments) — use stdlib equivalents only
     _TRANSIENT_LLM_ERRORS = (ConnectionError, TimeoutError, OSError)
 
 

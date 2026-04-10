@@ -348,13 +348,22 @@ class TestLLMRetry:
 
     @pytest.mark.skipif(not TENACITY_AVAILABLE, reason="tenacity not installed")
     def test_retries_on_transient_error_then_succeeds(self):
-        from app.agents.llm_client import invoke_llm_with_retry, _TRANSIENT_LLM_ERRORS
+        from tenacity import wait_none
+        from app.agents.llm_client import invoke_llm_with_retry
         llm = MagicMock()
         success = MagicMock(content="success")
-        # Raise the first transient error type, succeed on second attempt
-        llm.invoke.side_effect = [_TRANSIENT_LLM_ERRORS[0]("transient"), success]
+        # ConnectionError is always in _TRANSIENT_LLM_ERRORS (both openai-installed and fallback
+        # paths) and can be instantiated with a plain string — avoids openai's APIStatusError
+        # constructor requiring `response` and `body` kwargs.
+        llm.invoke.side_effect = [ConnectionError("transient"), success]
 
-        result = invoke_llm_with_retry(llm, "hello")
+        # Eliminate backoff wait so this test doesn't block CI for 2+ seconds.
+        invoke_llm_with_retry.retry.wait = wait_none()
+        try:
+            result = invoke_llm_with_retry(llm, "hello")
+        finally:
+            from tenacity import wait_exponential
+            invoke_llm_with_retry.retry.wait = wait_exponential(multiplier=1, min=2, max=10)
 
         assert result.content == "success"
         assert llm.invoke.call_count == 2
@@ -376,15 +385,15 @@ class TestLLMRetry:
     def test_reraises_after_all_retries_exhausted(self):
         """After 3 failed attempts, the last transient error is reraised."""
         from tenacity import wait_none
-        from app.agents.llm_client import invoke_llm_with_retry, _TRANSIENT_LLM_ERRORS
+        from app.agents.llm_client import invoke_llm_with_retry
         llm = MagicMock()
-        err = _TRANSIENT_LLM_ERRORS[0]("always fails")
-        llm.invoke.side_effect = err
+        # Use ConnectionError — always in _TRANSIENT_LLM_ERRORS and trivially constructable.
+        llm.invoke.side_effect = ConnectionError("always fails")
 
         # Eliminate exponential-backoff waits so this test doesn't block CI for ~6 s.
         invoke_llm_with_retry.retry.wait = wait_none()
         try:
-            with pytest.raises(_TRANSIENT_LLM_ERRORS[0]):
+            with pytest.raises(ConnectionError):
                 invoke_llm_with_retry(llm, "hello")
 
             assert llm.invoke.call_count == 3
