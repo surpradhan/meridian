@@ -9,7 +9,10 @@ MERIDIAN connects natural language business questions to intelligent database qu
 ## Quick Start
 
 ```bash
-# Enter project and create virtual environment
+# Clone the repository
+git clone https://github.com/surpradhan/meridian.git && cd meridian
+
+# Create virtual environment
 python3 -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 
