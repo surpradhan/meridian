@@ -26,7 +26,9 @@ async def list_history(
     from app.history.manager import get_history_manager
 
     limit = min(limit, 200)
-    return get_history_manager().list(limit=limit, user_id=current_user.id)
+    # Admins see all history; regular users see only their own.
+    uid = None if current_user.role == "admin" else current_user.id
+    return get_history_manager().list(limit=limit, user_id=uid)
 
 
 @router.get("/{history_id}", response_model=Dict[str, Any])

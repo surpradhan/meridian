@@ -6,6 +6,7 @@ patched HistoryManager singleton so each test gets an isolated SQLite database.
 """
 
 import pytest
+from datetime import datetime
 from unittest.mock import patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -20,11 +21,27 @@ def history_manager(tmp_path):
 
 @pytest.fixture
 def client(history_manager):
-    """Minimal TestClient with just the history router and a temp HistoryManager."""
+    """Minimal TestClient with just the history router, auth bypassed, temp HistoryManager."""
     from app.api.routes.history import router
+    from app.auth.dependencies import get_current_user
+    from app.auth.store import User
+
+    # Synthetic admin user — no DB connection needed.
+    test_user = User(
+        id="test-user-id",
+        username="tester",
+        email="tester@test.com",
+        password_hash="",
+        role="admin",
+        allowed_domains=["sales", "finance", "operations"],
+        is_active=True,
+        created_at=datetime.utcnow().isoformat(),
+    )
 
     mini_app = FastAPI()
     mini_app.include_router(router)
+    # Bypass JWT + AuthStore (which would try to open the PostgreSQL URL as SQLite in CI).
+    mini_app.dependency_overrides[get_current_user] = lambda: test_user
 
     # Routes import get_history_manager lazily inside each handler, so patch at source.
     with patch("app.history.manager.get_history_manager", return_value=history_manager):
