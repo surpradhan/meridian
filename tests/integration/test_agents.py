@@ -70,7 +70,7 @@ class TestQueryBuilder:
         query = builder.build_query(request)
 
         assert "WHERE" in query
-        assert "region = 'WEST'" in query
+        assert "region = ?" in query
 
     def test_build_query_with_aggregations(self, setup_test_environment):
         """Test building a query with GROUP BY and aggregations."""

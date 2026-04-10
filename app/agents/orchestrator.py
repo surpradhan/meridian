@@ -257,6 +257,7 @@ class Orchestrator:
             result["cache_hit"] = False
             result["conversation_id"] = conversation_id
             result["suggestions"] = self._generate_suggestions(query, domain, result)
+            result["visualization"] = self._build_visualization_hint(result)
 
             logger.info(
                 f"Query completed — domain={domain}, "
@@ -336,6 +337,24 @@ class Orchestrator:
     # ------------------------------------------------------------------
     # Suggestions (Phase 4.3)
     # ------------------------------------------------------------------
+
+    def _build_visualization_hint(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Recommend a chart type for the query result.
+
+        Args:
+            result: Query result dict (as returned by domain agents)
+
+        Returns:
+            Visualization hint dict with chart_type, x_axis, y_axis, reason.
+        """
+        try:
+            from app.visualization.chart_selector import select_chart_type
+            rows = result.get("result", [])
+            return select_chart_type(rows)
+        except Exception as e:
+            logger.warning(f"Visualization hint generation failed: {e}")
+            return {"chart_type": "table", "x_axis": None, "y_axis": None, "reason": "unavailable"}
 
     def _generate_suggestions(
         self,

@@ -8,7 +8,8 @@ The registry is implemented as a lazy-loaded singleton to avoid circular imports
 and enable easy testing (can create new instances).
 """
 
-from typing import List, Optional, Set, Tuple
+from collections import deque
+from typing import Dict, List, Optional, Set, Tuple
 import logging
 
 from app.views.models import ViewSchema, JoinRelationship
@@ -197,6 +198,52 @@ class ViewRegistry:
 
         return True, ""
 
+    def find_join_path(self, from_view: str, to_view: str) -> Optional[List[str]]:
+        """
+        Find the shortest join path between two views using BFS.
+
+        Args:
+            from_view: Starting view name
+            to_view: Target view name
+
+        Returns:
+            Ordered list of view names forming the join path (inclusive of both
+            endpoints), or None if no path exists.
+        """
+        if from_view not in self._views or to_view not in self._views:
+            return None
+
+        if from_view == to_view:
+            return [from_view]
+
+        # BFS with parent tracking to reconstruct the path
+        parents: Dict[str, Optional[str]] = {from_view: None}
+        queue: deque = deque([from_view])
+
+        while queue:
+            current = queue.popleft()
+
+            for (src, tgt) in self._joins:
+                neighbor = None
+                if src == current and tgt not in parents:
+                    neighbor = tgt
+                elif tgt == current and src not in parents:
+                    neighbor = src
+
+                if neighbor is not None:
+                    parents[neighbor] = current
+                    if neighbor == to_view:
+                        # Reconstruct path
+                        path = []
+                        node: Optional[str] = to_view
+                        while node is not None:
+                            path.append(node)
+                            node = parents[node]
+                        return list(reversed(path))
+                    queue.append(neighbor)
+
+        return None
+
     def get_reachable_views(self, start_view: str) -> Set[str]:
         """
         Find all views reachable from a starting view via join relationships.
@@ -213,10 +260,10 @@ class ViewRegistry:
             return set()
 
         visited = {start_view}
-        queue = [start_view]
+        queue: deque = deque([start_view])
 
         while queue:
-            current = queue.pop(0)
+            current = queue.popleft()
 
             # Find all views this view can join to (both directions)
             for (src, tgt), _ in self._joins.items():

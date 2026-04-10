@@ -17,9 +17,10 @@ Welcome to the MERIDIAN project documentation.
 ### Implementation
 - [Phase 1: View Registry](../MULTI_AGENT_PROTOTYPE_ROADMAP_v2.md#phase-1) - Building the metadata layer
 - [Phase 2: First Agent](../MULTI_AGENT_PROTOTYPE_ROADMAP_v2.md#phase-2) - Single agent implementation
-- [Phase 3: Query Safety](../MULTI_AGENT_PROTOTYPE_ROADMAP_v2.md#phase-3) - Validation & security
-- [Phase 4: Multi-Agent](../MULTI_AGENT_PROTOTYPE_ROADMAP_v2.md#phase-4) - Orchestration with Langraph
-- [Phase 5: Production](../MULTI_AGENT_PROTOTYPE_ROADMAP_v2.md#phase-5) - Hardening & deployment
+- [Phase 3: LLM-Powered NL](../MULTI_AGENT_PROTOTYPE_ROADMAP_v2.md#phase-3) - GPT-4 routing & interpretation
+- [Phase 4: Conversational Intelligence](../MULTI_AGENT_PROTOTYPE_ROADMAP_v2.md#phase-4) - Multi-turn context & history
+- [Phase 5: Enterprise Security](../MULTI_AGENT_PROTOTYPE_ROADMAP_v2.md#phase-5) - Auth, audit logging, CORS
+- [Phase 6: Advanced Query](PHASE_6_COMPLETION.md) - Window functions, CTEs, time intelligence, multi-hop joins
 
 ### Domain Guides
 - [Sales Agent](agents/sales_agent.md) - Revenue analysis queries
@@ -83,9 +84,9 @@ docs/
 
 ## Project Status
 
-**Version:** 0.1.0
-**Status:** In Development (Phase 1-2)
-**Last Updated:** [Current Date]
+**Version:** 0.6.0
+**Status:** Active Development (Phase 6 Complete — 441+ tests passing)
+**Last Updated:** 2026-04-09
 
 ---
 

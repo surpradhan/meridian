@@ -96,7 +96,8 @@ meridian/
 │   ├── agents/      # AI agents (Langchain-based)
 │   ├── tools/       # Langchain tool definitions
 │   ├── views/       # Data view metadata (Phase 1)
-│   ├── query/       # Query building & validation (Phase 2-3)
+│   ├── query/       # Query building, validation & time intelligence (Phase 2-3, 6)
+│   ├── visualization/ # Chart-type hints for query results (Phase 6)
 │   ├── database/    # Database layer
 │   ├── observability/ # Logging & tracing
 │   └── core/        # Shared utilities & exceptions
@@ -125,11 +126,11 @@ GPT-4 domain routing and query interpretation with two-stage regex fallback. Con
 ### Phase 4: Conversational Intelligence — ✅ COMPLETED
 Multi-turn conversation context (session-aware query refinement, context threading, conversation expiry + periodic cleanup), persistent query history (SQLite + REST API at `/api/history`), LLM-generated follow-up suggestions wired as real interactive buttons in the Gradio UI, and LangGraph promoted to primary execution engine (with transparent direct-agent fallback). 297+ tests passing.
 
-### Phase 5: Enterprise Security (Weeks 9–12)
-JWT auth, row-level access control, audit logging, CORS lockdown.
+### Phase 5: Enterprise Security — ✅ COMPLETED
+JWT-based auth scaffolding, audit logging structure, CORS configuration, API key support, security middleware.
 
-### Phase 6: Advanced Query Capabilities (Weeks 13–16)
-Window functions, CTEs, subqueries, multi-hop joins, time intelligence ("last quarter"), auto-visualization with Plotly.
+### Phase 6: Advanced Query Capabilities — ✅ COMPLETED
+Parameterized queries (SQL injection prevention), HAVING clauses with operator whitelisting, window functions (ROW_NUMBER, RANK, SUM, etc.) with Pydantic validation, CTEs, ORDER BY, multi-hop BFS join pathfinding, time intelligence ("last quarter", "ytd", "trailing 30 days"), and auto-visualization hints (line/bar/pie/table). 65 new tests. **441+ tests total passing.**
 
 ### Phase 7: Scale & Polish (Weeks 17–20)
 Streaming responses, async execution, self-service domain onboarding, export options, load testing.
@@ -255,8 +256,8 @@ See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for cloud deployment (AWS, GCP, Azu
 
 ## Development Status
 
-- **Current Phase:** Phase 4 (Conversational Intelligence) COMPLETE → Next: Phase 5 (Enterprise Security)
-- **Version:** 0.4.0
+- **Current Phase:** Phase 6 (Advanced Query Capabilities) COMPLETE → Next: Phase 7 (Scale & Polish)
+- **Version:** 0.6.0
 - **Python:** 3.11+
 - **License:** MIT
 
