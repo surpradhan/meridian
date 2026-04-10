@@ -269,12 +269,24 @@ class WindowFunction(BaseModel):
     Attributes:
         alias: Column alias for the window function result
         function: Window function name — must be one of the supported SQL window functions
+        arguments: Optional raw argument string placed inside the function call parentheses.
+            Required for functions that take arguments: ``NTILE(4)``, ``NTH_VALUE(col, 2)``,
+            ``LAG(col, 1)``, ``LEAD(col, 1)``.  Leave ``None`` for zero-argument functions
+            like ``ROW_NUMBER``, ``RANK``, ``DENSE_RANK``, ``SUM``, etc.
         partition_by: Columns to partition by (PARTITION BY clause)
         order_by: Columns + direction for ORDER BY inside the window
     """
 
     alias: str = Field(..., min_length=1, description="Alias for the computed column")
     function: str = Field(..., description="Window function (ROW_NUMBER, RANK, SUM, etc.)")
+    arguments: Optional[str] = Field(
+        default=None,
+        description=(
+            "Arguments placed inside the function parentheses — required for "
+            "NTILE(n), NTH_VALUE(col, n), LAG(col, offset), LEAD(col, offset). "
+            "Leave None for zero-argument functions (ROW_NUMBER, RANK, SUM, …)."
+        ),
+    )
     partition_by: Optional[List[str]] = Field(default=None, description="PARTITION BY columns")
     order_by: Optional[List[OrderByItem]] = Field(
         default=None,

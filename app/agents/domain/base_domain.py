@@ -181,6 +181,15 @@ class BaseDomainAgent(ABC):
                     logger.warning(f"Could not parse window_functions: {wf_err}")
                     window_functions = None
 
+            raw_ctes = parsed.get("ctes") or []
+            ctes = None
+            if raw_ctes:
+                try:
+                    ctes = [CTEDefinition(**cte) for cte in raw_ctes]
+                except Exception as cte_err:
+                    logger.warning(f"Could not parse ctes: {cte_err}")
+                    ctes = None
+
             request = QueryRequest(
                 selected_views=selected_views,
                 filters=parsed.get("filters") or None,
@@ -189,6 +198,7 @@ class BaseDomainAgent(ABC):
                 having=parsed.get("having") or None,
                 order_by=parsed.get("order_by") or None,
                 window_functions=window_functions,
+                ctes=ctes,
                 time_expression=parsed.get("time_expression") or None,
                 time_column=parsed.get("time_column") or None,
                 limit=100,

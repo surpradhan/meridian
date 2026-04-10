@@ -700,3 +700,203 @@ class TestTimeIntelligenceDefaultDate:
         start, end = resolve_time_expression("last_month", reference_date=date(2025, 3, 10))
         assert start == date(2025, 2, 1)
         assert end == date(2025, 2, 28)
+
+
+# ---------------------------------------------------------------------------
+# PR review fixes — regression tests
+# ---------------------------------------------------------------------------
+
+class TestBFSUsesDeque:
+    """Fix #1 — BFS in find_join_path and get_reachable_views uses deque (O(1) popleft)."""
+
+    def test_find_join_path_still_correct_after_deque_refactor(self):
+        """Functional correctness is unchanged; deque is an impl detail."""
+        reg = _minimal_registry()
+        assert reg.find_join_path("view_a", "view_c") == ["view_a", "view_b", "view_c"]
+
+    def test_get_reachable_views_still_correct_after_deque_refactor(self):
+        reg = _minimal_registry()
+        reachable = reg.get_reachable_views("view_a")
+        assert reachable == {"view_a", "view_b", "view_c"}
+
+
+class TestOrderByAggregateAliasDetection:
+    """Fix #3 — ORDER BY alias matching uses actual aggregation dict, not string prefix."""
+
+    def test_real_agg_alias_emitted_as_is(self):
+        """SUM_amount is a known alias — should NOT be table-qualified."""
+        reg = _sales_registry()
+        builder = QueryBuilder(reg)
+        req = QueryRequest(
+            selected_views=["sales_fact"],
+            aggregations={"amount": "SUM"},
+            group_by=["region"],
+            order_by=[{"column": "SUM_amount", "direction": "DESC"}],
+        )
+        sql = builder.build_query(req)
+        assert "ORDER BY SUM_amount DESC" in sql
+        # Must NOT be prefixed with a table name
+        assert "sales_fact.SUM_amount" not in sql
+
+    def test_column_named_like_agg_prefix_gets_qualified(self):
+        """A real column called 'sum_region' must be table-qualified, not treated as alias."""
+        reg = ViewRegistry()
+        reg.register_view(_make_view("sales_fact", "sales", [
+            _make_col("sale_id", "INT"),
+            _make_col("sum_region", "VARCHAR"),   # column that starts with "sum_"
+            _make_col("amount", "DECIMAL"),
+        ]))
+        builder = QueryBuilder(reg)
+        req = QueryRequest(
+            selected_views=["sales_fact"],
+            order_by=[{"column": "sum_region", "direction": "ASC"}],
+        )
+        sql = builder.build_query(req)
+        # With the old heuristic this would have been "sum_region ASC" (unqualified alias)
+        # With the fix it must be table-qualified
+        assert "sales_fact.sum_region ASC" in sql
+
+
+class TestWindowFunctionArguments:
+    """Fix #4 — WindowFunction.arguments enables NTILE, LAG, LEAD, NTH_VALUE."""
+
+    def test_no_args_gives_empty_parens(self):
+        """Zero-argument functions get empty parens: ROW_NUMBER()."""
+        reg = _sales_registry()
+        builder = QueryBuilder(reg)
+        req = QueryRequest(
+            selected_views=["sales_fact"],
+            window_functions=[WindowFunction(alias="rn", function="ROW_NUMBER")],
+        )
+        sql = builder.build_query(req)
+        assert "ROW_NUMBER() OVER" in sql
+
+    def test_ntile_with_arguments(self):
+        """NTILE(4) requires arguments field."""
+        reg = _sales_registry()
+        builder = QueryBuilder(reg)
+        req = QueryRequest(
+            selected_views=["sales_fact"],
+            window_functions=[
+                WindowFunction(
+                    alias="quartile",
+                    function="NTILE",
+                    arguments="4",
+                    order_by=[{"column": "amount", "direction": "DESC"}],
+                )
+            ],
+        )
+        sql = builder.build_query(req)
+        assert "NTILE(4) OVER" in sql
+        assert "AS quartile" in sql
+
+    def test_lag_with_arguments(self):
+        """LAG(col, 1) requires arguments field."""
+        reg = _sales_registry()
+        builder = QueryBuilder(reg)
+        req = QueryRequest(
+            selected_views=["sales_fact"],
+            window_functions=[
+                WindowFunction(
+                    alias="prev_amount",
+                    function="LAG",
+                    arguments="sales_fact.amount, 1",
+                    order_by=[{"column": "date", "direction": "ASC"}],
+                )
+            ],
+        )
+        sql = builder.build_query(req)
+        assert "LAG(sales_fact.amount, 1) OVER" in sql
+
+    def test_nth_value_with_arguments(self):
+        reg = _sales_registry()
+        builder = QueryBuilder(reg)
+        req = QueryRequest(
+            selected_views=["sales_fact"],
+            window_functions=[
+                WindowFunction(
+                    alias="second_amount",
+                    function="NTH_VALUE",
+                    arguments="sales_fact.amount, 2",
+                    partition_by=["region"],
+                    order_by=[{"column": "amount", "direction": "DESC"}],
+                )
+            ],
+        )
+        sql = builder.build_query(req)
+        assert "NTH_VALUE(sales_fact.amount, 2) OVER" in sql
+
+
+class TestHavingMalformedKey:
+    """Fix #5 — Malformed HAVING key raises ValueError instead of silently skipping."""
+
+    def test_malformed_key_no_underscore_raises(self):
+        """A key with no underscore cannot be parsed as '<AGG>_<column>'."""
+        reg = _sales_registry()
+        builder = QueryBuilder(reg)
+        req = QueryRequest(
+            selected_views=["sales_fact"],
+            aggregations={"amount": "SUM"},
+            group_by=["region"],
+            having={"total": {"op": ">", "value": 1000}},
+        )
+        with pytest.raises(ValueError, match="malformed"):
+            builder.build_query(req)
+
+
+class TestCTEParsingInLLMInterpreter:
+    """Fix #6 — CTEDefinition is parsed from LLM response, not just imported."""
+
+    def test_cte_definition_can_be_constructed(self):
+        """Smoke test that CTEDefinition is importable and constructable."""
+        cte = CTEDefinition(name="top_customers", sql="SELECT customer_id FROM sales_fact LIMIT 5")
+        assert cte.name == "top_customers"
+        assert "SELECT" in cte.sql
+
+    def test_multiple_ctes_in_query(self):
+        reg = _sales_registry()
+        builder = QueryBuilder(reg)
+        req = QueryRequest(
+            selected_views=["sales_fact"],
+            ctes=[
+                CTEDefinition(name="cte_a", sql="SELECT sale_id FROM sales_fact WHERE amount > 100"),
+                CTEDefinition(name="cte_b", sql="SELECT sale_id FROM cte_a LIMIT 10"),
+            ],
+        )
+        sql = builder.build_query(req)
+        assert "WITH cte_a AS (" in sql
+        assert "cte_b AS (" in sql
+        assert sql.index("cte_a") < sql.index("cte_b")
+
+
+class TestDetectTimeExpressionCleanup:
+    """Fix #7 — detect_time_expression has no dead None-canonical entries."""
+
+    def test_trailing_n_days_still_detected(self):
+        assert detect_time_expression("orders in the last 14 days") == "trailing_14_days"
+        assert detect_time_expression("trailing 30 days revenue") == "trailing_30_days"
+
+    def test_named_expressions_still_detected(self):
+        assert detect_time_expression("revenue last quarter") == "last_quarter"
+        assert detect_time_expression("ytd performance") == "ytd"
+        assert detect_time_expression("this year totals") == "ytd"
+        assert detect_time_expression("previous year comparison") == "last_year"
+
+    def test_no_match_returns_none(self):
+        assert detect_time_expression("show me all sales") is None
+
+
+class TestBuildQueryDocstring:
+    """Fix #8 — build_query returns ? placeholders (not inlined), matching its docstring."""
+
+    def test_build_query_returns_placeholder_not_inline(self):
+        """The template must contain ? even for build_query() (not build_query_parameterized)."""
+        reg = _sales_registry()
+        builder = QueryBuilder(reg)
+        req = QueryRequest(
+            selected_views=["sales_fact"],
+            filters={"region": "WEST"},
+        )
+        sql = builder.build_query(req)
+        assert "?" in sql
+        assert "WEST" not in sql  # value must NOT be inlined

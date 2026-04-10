@@ -127,6 +127,12 @@ def detect_time_expression(text: str) -> Optional[str]:
     Returns the canonical (underscore-separated) expression string,
     or None if none is found.
     """
+    # Trailing/last N days checked first (needs capture group, handled separately)
+    text_lower = text.lower()
+    n_days = re.search(r"\b(?:trailing|last)\s+(\d+)\s+days?\b", text_lower)
+    if n_days:
+        return f"trailing_{n_days.group(1)}_days"
+
     patterns = [
         (r"\blast\s+quarter\b", "last_quarter"),
         (r"\bprevious\s+quarter\b", "last_quarter"),
@@ -136,26 +142,14 @@ def detect_time_expression(text: str) -> Optional[str]:
         (r"\bprevious\s+month\b", "last_month"),
         (r"\bthis\s+month\b", "this_month"),
         (r"\bcurrent\s+month\b", "this_month"),
-        (r"\bq[1-4]\b", None),  # handled separately below
         (r"\bytd\b", "ytd"),
         (r"\byear[_\s]to[_\s]date\b", "ytd"),
         (r"\bthis\s+year\b", "ytd"),
         (r"\blast\s+year\b", "last_year"),
         (r"\bprevious\s+year\b", "last_year"),
-        (r"\btrailing\s+(\d+)\s+days?\b", None),  # handled separately
-        (r"\blast\s+(\d+)\s+days?\b", None),       # handled separately
     ]
 
-    text_lower = text.lower()
-
-    # Trailing/last N days
-    n_days = re.search(r"\b(?:trailing|last)\s+(\d+)\s+days?\b", text_lower)
-    if n_days:
-        return f"trailing_{n_days.group(1)}_days"
-
     for pattern, canonical in patterns:
-        if canonical is None:
-            continue
         if re.search(pattern, text_lower):
             return canonical
 

@@ -8,6 +8,7 @@ The registry is implemented as a lazy-loaded singleton to avoid circular imports
 and enable easy testing (can create new instances).
 """
 
+from collections import deque
 from typing import Dict, List, Optional, Set, Tuple
 import logging
 
@@ -217,10 +218,10 @@ class ViewRegistry:
 
         # BFS with parent tracking to reconstruct the path
         parents: Dict[str, Optional[str]] = {from_view: None}
-        queue = [from_view]
+        queue: deque = deque([from_view])
 
         while queue:
-            current = queue.pop(0)
+            current = queue.popleft()
 
             for (src, tgt) in self._joins:
                 neighbor = None
@@ -259,10 +260,10 @@ class ViewRegistry:
             return set()
 
         visited = {start_view}
-        queue = [start_view]
+        queue: deque = deque([start_view])
 
         while queue:
-            current = queue.pop(0)
+            current = queue.popleft()
 
             # Find all views this view can join to (both directions)
             for (src, tgt), _ in self._joins.items():

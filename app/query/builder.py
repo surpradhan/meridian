@@ -44,17 +44,21 @@ class QueryBuilder:
         """
         Build a SQL query string from a QueryRequest.
 
-        Convenience wrapper around ``build_query_parameterized`` that returns
-        only the SQL string (parameters are inlined).  Use
-        ``build_query_parameterized`` for production execution to avoid SQL
-        injection via string filter values.
+        Convenience wrapper around ``build_query_parameterized`` that discards
+        the params list and returns only the SQL template string.  The returned
+        string contains ``?`` placeholders wherever user-supplied values appear —
+        it is **not** a fully inlined query and cannot be executed directly without
+        binding parameters.
+
+        Use this method for display, logging, or tests that only need to inspect
+        SQL structure.  For production execution use ``build_query_parameterized``
+        and pass the returned params to ``db.execute_query``.
 
         Args:
             request: QueryRequest with selected views, filters, aggregations, etc.
 
         Returns:
-            SQL query string (parameters inlined — safe only for read-only SQLite
-            with trusted input; use build_query_parameterized for production)
+            SQL template string with ``?`` placeholders (params discarded)
 
         Raises:
             ValueError: If views are invalid or cannot be joined
@@ -171,8 +175,15 @@ class QueryBuilder:
         return f"SELECT {', '.join(parts)}"
 
     def _render_window_function(self, wf: WindowFunction, views: List[str]) -> str:
-        """Render a WindowFunction spec into a SQL expression alias."""
+        """Render a WindowFunction spec into a SQL expression with alias.
+
+        The ``arguments`` field is placed verbatim inside the function parentheses,
+        allowing functions that require arguments (NTILE, NTH_VALUE, LAG, LEAD) to
+        be expressed correctly.  Zero-argument functions (ROW_NUMBER, RANK, SUM, …)
+        leave ``arguments`` as None and get empty parentheses.
+        """
         func = wf.function.upper()
+        func_args = wf.arguments or ""
 
         # PARTITION BY
         if wf.partition_by:
@@ -196,7 +207,7 @@ class QueryBuilder:
         window_spec_parts = [p for p in [partition_clause, order_clause] if p]
         window_spec = " ".join(window_spec_parts)
 
-        return f"{func}() OVER ({window_spec}) AS {wf.alias}"
+        return f"{func}({func_args}) OVER ({window_spec}) AS {wf.alias}"
 
     def _build_from_clause(self, request: QueryRequest) -> str:
         """
@@ -450,10 +461,13 @@ class QueryBuilder:
 
         conditions = []
         for alias_key, condition in request.having.items():
-            # alias_key format: "<AGG>_<column>"
+            # alias_key format: "<AGG>_<column>" (e.g. "SUM_amount")
             key_parts = alias_key.split("_", 1)
             if len(key_parts) != 2:
-                continue
+                raise ValueError(
+                    f"HAVING key '{alias_key}' is malformed. "
+                    "Expected '<AGG>_<column>' (e.g. 'SUM_amount')."
+                )
             agg_func, column = key_parts[0].upper(), key_parts[1]
             qualified_col = self._resolve_column_table(column, request.selected_views)
 
@@ -497,13 +511,21 @@ class QueryBuilder:
         if not request.order_by:
             return None
 
+        # Build the exact set of aggregate alias names used in the SELECT clause
+        # (e.g. {"SUM_amount", "COUNT_sale_id"}) so we can match precisely instead
+        # of relying on a fragile string-prefix heuristic that would mis-classify
+        # real column names like "sum_of_debits".
+        agg_aliases: Set[str] = set()
+        if request.aggregations:
+            for agg_col, agg_func in request.aggregations.items():
+                agg_aliases.add(f"{agg_func}_{agg_col}")
+
         parts = []
         for item in request.order_by:
             col = item.column
             direction = item.direction
-            # If the column looks like an aggregate alias (e.g. "SUM_amount"),
-            # emit it as-is; otherwise qualify it.
-            if "_" in col and col.split("_", 1)[0].upper() in {"SUM", "COUNT", "AVG", "MIN", "MAX"}:
+            if col in agg_aliases:
+                # Aggregate alias — emit as-is (already the right expression)
                 parts.append(f"{col} {direction}")
             else:
                 qualified = self._resolve_column_table(col, request.selected_views)
@@ -516,6 +538,11 @@ class QueryBuilder:
     def _build_cte_clause(self, request: QueryRequest) -> Optional[str]:
         """
         Build WITH (CTE) preamble.
+
+        .. warning:: **Trust boundary** — ``CTEDefinition.sql`` is embedded verbatim.
+            CTEs are never user-typed input; they are either LLM-generated (already
+            sandboxed by the view-schema prompt) or constructed in code.  Do **not**
+            accept raw CTE SQL from untrusted external sources without validation.
 
         Args:
             request: QueryRequest
