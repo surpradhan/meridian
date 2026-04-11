@@ -1,5 +1,17 @@
 # MERIDIAN Changelog
 
+## v0.8.0 — Phase 8: Security & Observability (2026-04-12)
+
+- **OAuth2 / OIDC SSO**: Google OAuth2 and generic OIDC (Okta, Keycloak, Azure AD, etc.) via `GET /api/auth/oauth/authorize` and `GET /api/auth/oauth/callback`; new users auto-provisioned as `viewer`
+- **SQL syntax pre-validation**: `QueryValidator.validate_sql_syntax()` uses in-memory SQLite `EXPLAIN` to catch parse errors before execution; singleton connection with thread-safe lock
+- **Plotly charts**: Interactive line/bar/pie charts fully wired in Gradio UI; chart type auto-selected from result shape via `chart_selector.py`
+- **Observability wired**: `TracingManager` spans throughout `Orchestrator.process_query` (cache check, routing, agent execute, suggestions, cache store); `QueryMetrics` records per-query counters and histograms
+- **Config hardening**: `@model_validator` cross-checks OIDC settings — all three (`OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_ISSUER`) must be set together or all omitted
+- **`app/auth/constants.py`**: Shared `OAUTH_ONLY_SENTINEL` constant eliminates duplication between `store.py` and `routes.py`
+- **Dynamic domain reload**: `reload_domain_agents()` returns `bool`; admin API surfaces failure in HTTP response instead of swallowing it silently
+- **UI bug fixes**: Empty-input guard in `run_query`; history `gr.HTML` → `gr.Dataframe` with `gr.SelectData` (click-to-fill); SQLite window function alias expansion in `_render_window_function`; Gradio CSS moved to `launch()` for Gradio 6.x compatibility
+- **Tests**: 541+ passing (19 new: OIDC discovery, OAuth email guard, SQL whitespace handling)
+
 ## v0.7.0 — Phase 7: Scale & Polish (2026-04-11)
 
 - Async query execution: background job queue with `POST /api/query/execute-async` + polling

@@ -11,7 +11,9 @@ Advanced capabilities available in the platform. Most features are configurable 
 5. [Conversation Context](#conversation-context)
 6. [Index Optimization](#index-optimization)
 7. [Time Intelligence](#time-intelligence)
-8. [Visualization Hints](#visualization-hints)
+8. [Visualization Hints & Plotly Charts](#visualization-hints--plotly-charts)
+9. [OAuth2 / OIDC SSO](#oauth2--oidc-sso)
+10. [SQL Syntax Validation](#sql-syntax-validation)
 
 ---
 
@@ -242,9 +244,11 @@ In the query builder, `time_column` is validated against registered view columns
 
 ---
 
-## Visualization Hints
+## Visualization Hints & Plotly Charts
 
-Every orchestrator result includes a `visualization` key with an inferred chart type based on result shape.
+Every orchestrator result includes a `visualization` key with an inferred chart type, and the Gradio UI renders it as an interactive Plotly chart.
+
+**Chart selection heuristics:**
 
 | Condition | Chart type |
 |-----------|-----------|
@@ -266,7 +270,67 @@ Every orchestrator result includes a `visualization` key with an inferred chart 
 }
 ```
 
-Plotly rendering in the Gradio UI is planned for Phase 7. The `visualization` key is already attached to every result today.
+The Gradio UI (`gradio_app.py`) reads the `visualization` hint and renders a full Plotly figure via `build_plotly_figure()`. Charts are interactive (hover, zoom, pan) and appear alongside the tabular results. The chart type and axis mapping are determined automatically — no configuration needed.
+
+---
+
+## OAuth2 / OIDC SSO
+
+MERIDIAN supports delegated login via **Google OAuth2** and any **generic OIDC provider** (Okta, Keycloak, Azure AD, etc.).
+
+**Setup — Google:**
+```bash
+GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=your-client-secret
+OAUTH_REDIRECT_BASE_URL=http://localhost:8000
+```
+
+**Setup — Generic OIDC (Okta, Keycloak, etc.):**
+```bash
+OIDC_ISSUER=https://your-provider.example.com
+OIDC_CLIENT_ID=your-client-id
+OIDC_CLIENT_SECRET=your-client-secret
+OAUTH_REDIRECT_BASE_URL=http://localhost:8000
+```
+
+All three OIDC variables must be set together (or all left unset) — the server rejects partial OIDC configuration at startup.
+
+**Flow:**
+1. `GET /api/auth/oauth/authorize?provider=google` → returns `{ redirect_url, state }`
+2. User logs in at provider, consents
+3. Provider redirects to `GET /api/auth/oauth/callback?code=...&state=...`
+4. Server validates state, exchanges code, provisions user if new, returns Meridian JWT
+
+New OAuth users are auto-provisioned as `viewer` with no domain access; an admin must grant permissions.
+
+> ⚠️ **Multi-worker deployments**: OAuth state tokens are stored in-process memory. Running multiple workers (Gunicorn `-w 4`, Kubernetes) requires replacing `_STATE_STORE` in `app/auth/oauth.py` with a Redis-backed store.
+
+See [docs/AUTH.md](AUTH.md) for the full authentication and RBAC guide.
+
+---
+
+## SQL Syntax Validation
+
+Before executing a generated SQL query against the real database, `QueryValidator.validate_sql_syntax()` parses it through SQLite's `EXPLAIN` on a schema-less in-memory database. This catches SQL parse errors (misspelled keywords, unclosed parentheses, malformed clauses) without touching live data.
+
+```python
+from app.query.validator import get_validator
+
+validator = get_validator()
+valid, errors = validator.validate_sql_syntax(
+    "SELECT region, SUM(amount) FROM sales_fact GROUP BY region LIMIT 100"
+)
+# valid=True, errors=[]
+
+valid, errors = validator.validate_sql_syntax("SELEKT region FROM sales_fact")
+# valid=False, errors=["SQL syntax error: near 'SELEKT': syntax error"]
+```
+
+**Design decisions:**
+- **Fail-open**: unexpected validator errors log at `ERROR` level but return `True` to avoid blocking valid queries due to validator bugs
+- **Missing tables/columns are expected**: the in-memory DB has no schema; those errors are treated as pass
+- **Singleton connection**: a module-level `_SYNTAX_CONN` (protected by `_SYNTAX_LOCK`) avoids creating a new connection on every call
+- **DDL skipped**: `CREATE`, `ALTER`, `DROP` are not `EXPLAIN`-able in SQLite and are never emitted by the builder anyway
 
 ---
 

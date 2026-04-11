@@ -105,7 +105,8 @@ meridian/
 │   ├── explain/     # Query explain response builder (Phase 7)
 │   ├── onboarding/  # Self-service domain registry (Phase 7)
 │   ├── database/    # Database layer + index advisor
-│   ├── observability/ # Logging & tracing
+│   ├── auth/        # JWT auth, OAuth2/OIDC, RBAC, audit logging
+│   ├── observability/ # Logging, metrics & tracing
 │   └── core/        # Shared utilities & exceptions
 │
 ├── tests/            # Test suite (unit, integration, performance)
@@ -140,6 +141,9 @@ Parameterized queries (SQL injection prevention), HAVING clauses with operator w
 
 ### Phase 7: Scale & Polish — ✅ COMPLETED
 Async query execution with job polling, SSE streaming responses, self-service domain onboarding (register new domains via API without code changes), JSON/CSV/Excel export, query explain mode (routing decision + SQL + filters), index advisor wired into query path, load testing suite, and full API documentation. Multi-LLM provider support (Groq + OpenAI). **522+ tests passing.**
+
+### Phase 8: Security & Observability — ✅ COMPLETED
+OAuth2 / OIDC SSO (Google + generic OIDC providers), SQL syntax pre-validation via SQLite EXPLAIN, Plotly interactive charts fully wired in the Gradio UI (line/bar/pie auto-selected), observability spans and query metrics wired throughout the orchestrator, and hardened configuration validation (OIDC all-or-nothing check). **541+ tests passing.**
 
 ---
 
@@ -177,7 +181,8 @@ make help             # Show all available commands
 - **[API Reference](docs/API.md)** — All endpoints with request/response schemas
 - **[Benchmarks](docs/BENCHMARKS.md)** — Performance targets and load test guide
 - **[Changelog](docs/CHANGELOG.md)** — What changed in each version
-- **[Roadmap](docs/MULTI_AGENT_PROTOTYPE_ROADMAP_v2.md)** — Phase-by-phase design rationale
+- **[Roadmap](docs/ROADMAP.md)** — Phase-by-phase design rationale
+- **[Auth Guide](docs/AUTH.md)** — OAuth2/OIDC setup, RBAC, and JWT configuration
 
 ---
 
@@ -266,8 +271,8 @@ See the [Architecture doc](docs/ARCHITECTURE.md) for deployment topology notes.
 
 ## Development Status
 
-- **Current Phase:** Phase 7 (Scale & Polish) COMPLETE — all 7 phases done
-- **Version:** 0.7.0
+- **Current Phase:** Phase 8 (Security & Observability) COMPLETE — all 8 phases done
+- **Version:** 0.8.0
 - **Python:** 3.11+
 - **License:** MIT
 

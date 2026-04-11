@@ -338,9 +338,11 @@ Returns:
 ## Auth Endpoints
 
 ```http
-POST /auth/register    # Create a new user account
-POST /auth/login       # Obtain a JWT token
-GET  /auth/me          # Get current user info
+POST /api/auth/register              # Create a new user account
+POST /api/auth/login                 # Obtain a JWT token (username + password)
+GET  /api/auth/me                    # Get current user info
+GET  /api/auth/oauth/authorize       # Begin OAuth2 / OIDC flow
+GET  /api/auth/oauth/callback        # Handle OAuth2 / OIDC callback
 ```
 
 ### Register
@@ -349,7 +351,50 @@ GET  /auth/me          # Get current user info
 {"username": "alice", "password": "secure_password", "email": "alice@company.com"}
 ```
 
-Default role is `viewer`. Admins can be created by an existing admin.
+Default role is `viewer`. Admins can be created by an existing admin. The first registered user is always promoted to `admin` (bootstrap mode).
+
+### OAuth2 / OIDC Login
+
+**Step 1 — Begin authorization flow:**
+```http
+GET /api/auth/oauth/authorize?provider=google
+```
+
+**Response:**
+```json
+{"redirect_url": "https://accounts.google.com/o/oauth2/v2/auth?...", "state": "<csrf-token>", "provider": "google"}
+```
+
+Redirect the user's browser to `redirect_url`.
+
+**Step 2 — Handle callback (provider redirects here):**
+```http
+GET /api/auth/oauth/callback?provider=google&code=<auth-code>&state=<csrf-token>
+```
+
+**Response:**
+```json
+{"access_token": "<meridian-jwt>", "token_type": "bearer", "expires_in_hours": 24}
+```
+
+Use the token in the `Authorization: Bearer <token>` header for all subsequent requests.
+
+**Supported providers:** `google`, `oidc` (any OIDC issuer configured via `OIDC_ISSUER`)
+
+**Configuration:**
+```bash
+# Google
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+OAUTH_REDIRECT_BASE_URL=http://localhost:8000
+
+# Generic OIDC (all three required together)
+OIDC_ISSUER=https://your-provider.example.com
+OIDC_CLIENT_ID=...
+OIDC_CLIENT_SECRET=...
+```
+
+See [AUTH.md](AUTH.md) for full setup instructions and role assignment.
 
 ---
 

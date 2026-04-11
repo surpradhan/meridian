@@ -221,11 +221,14 @@ Return Results with Confidence + interpretation_method ("llm" | "regex")
 3. **Cardinality Validation**: Many-to-many without aggregation = warning
 4. **Limit Validation**: Enforces max_result_rows constraint
 5. **Column Validation**: Filter/aggregation columns exist
+6. **SQL Syntax Validation**: Pre-validates generated SQL via SQLite `EXPLAIN` on an in-memory DB before hitting the real database — catches misspelled keywords, unclosed parentheses, and malformed clauses; fail-open (unexpected validator errors return `True` to avoid blocking valid queries); missing table/column errors are expected and treated as pass
 
 **Features**:
 - `validate()` - Full validation
+- `validate_sql_syntax(sql)` → `(is_valid, errors)` — syntax pre-check via SQLite EXPLAIN
 - `estimate_result_size()` - Row count estimation
 - `get_validation_warnings()` - Non-blocking suggestions
+- Singleton connection (`_SYNTAX_CONN`) protected by `_SYNTAX_LOCK` (thread-safe, one connection reused across calls)
 
 ### 7. Query Builder (`app/query/builder.py`)
 
@@ -318,6 +321,23 @@ Return Results with Confidence + interpretation_method ("llm" | "regex")
 **`ExplainResponse` fields**: `query`, `routing_decision`, `views_selected`, `filters_extracted`, `aggregations`, `group_by`, `sql_generated`, `join_paths`, `time_resolution`, `interpretation_method`, `confidence`
 
 **Integration**: `POST /api/query/execute` with `explain=true` appends `"explain": ExplainResponse.model_dump()` to the response.
+
+### 8f. OAuth2 / OIDC Manager (`app/auth/oauth.py`)
+
+**Responsibility**: Delegated authentication via Google OAuth2 and generic OIDC providers
+
+**Flow**:
+1. `authorize(provider)` — builds provider authorization URL, stores a CSRF `state` token in `_STATE_STORE` (in-process dict), returns redirect URL
+2. `handle_callback(provider, code, state)` — validates state, exchanges auth code for tokens, fetches userinfo, auto-provisions new users as `viewer` via `UserStore`
+3. Returns a Meridian JWT (same format as username/password login)
+
+**Providers**:
+- **Google**: configured via `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`
+- **Generic OIDC**: configured via `OIDC_ISSUER` / `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET`; endpoints discovered from `{issuer}/.well-known/openid-configuration`
+
+**Design notes**:
+- `_STATE_STORE` is in-process memory — multi-worker deployments (Gunicorn `-w N`, Kubernetes) must replace it with a Redis-backed store
+- All three OIDC settings are required together (enforced by `@model_validator` in `config.py`); partial config raises `ValueError` at startup
 
 ### 8. View Registry (`app/views/registry.py`)
 
@@ -484,7 +504,7 @@ tests/
     └── mocks.py
 ```
 
-**Total: 522+ tests, all passing**
+**Total: 541+ tests, all passing**
 
 ## Deployment Architecture
 
@@ -517,12 +537,12 @@ tests/
 
 ## Future Enhancements
 
-1. **Plotly Visualization**: Wire `visualization` hint from orchestrator result into Gradio chart rendering
-2. **Kubernetes / Helm**: Manifests for cloud deployment at scale
-3. **Multi-tenancy**: Row-level security for multiple organizations
-4. **Audit Log API**: Expose the audit trail via a REST endpoint
-5. **Webhook notifications**: Push job-complete events to caller-supplied URLs
+1. **Kubernetes / Helm**: Manifests for cloud deployment at scale
+2. **Multi-tenancy**: Row-level security for multiple organizations
+3. **Audit Log API**: Expose the audit trail via a REST endpoint
+4. **Webhook notifications**: Push job-complete events to caller-supplied URLs
+5. **OAuth state in Redis**: Replace in-process `_STATE_STORE` for multi-worker deployments
 
 ---
 
-**Last Updated**: 2026-04-11
+**Last Updated**: 2026-04-12
