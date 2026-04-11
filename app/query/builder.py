@@ -170,20 +170,38 @@ class QueryBuilder:
         # Append window functions if any
         if request.window_functions:
             for wf in request.window_functions:
-                parts.append(self._render_window_function(wf, request.selected_views))
+                parts.append(self._render_window_function(wf, request.selected_views, request.aggregations))
 
         return f"SELECT {', '.join(parts)}"
 
-    def _render_window_function(self, wf: WindowFunction, views: List[str]) -> str:
+    def _render_window_function(
+        self,
+        wf: WindowFunction,
+        views: List[str],
+        aggregations: Optional[dict] = None,
+    ) -> str:
         """Render a WindowFunction spec into a SQL expression with alias.
 
         The ``arguments`` field is placed verbatim inside the function parentheses,
         allowing functions that require arguments (NTILE, NTH_VALUE, LAG, LEAD) to
         be expressed correctly.  Zero-argument functions (ROW_NUMBER, RANK, SUM, …)
         leave ``arguments`` as None and get empty parentheses.
+
+        ``aggregations`` is used to expand aggregate aliases (e.g. ``SUM_amount``)
+        inside the window ORDER BY to their full expressions, since SQLite does not
+        allow column aliases in that position.
         """
         func = wf.function.upper()
         func_args = wf.arguments or ""
+
+        # Build alias → full-expression map so window ORDER BY can dereference them.
+        # e.g. {"SUM_amount": "SUM(sales_fact.amount)"}
+        agg_expr_map: dict = {}
+        if aggregations:
+            for col, agg_func in aggregations.items():
+                alias = f"{agg_func}_{col}"
+                qualified_col = self._resolve_column_table(col, views)
+                agg_expr_map[alias] = f"{agg_func}({qualified_col})"
 
         # PARTITION BY
         if wf.partition_by:
@@ -194,12 +212,16 @@ class QueryBuilder:
         else:
             partition_clause = ""
 
-        # ORDER BY inside window
+        # ORDER BY inside window — expand aggregate aliases to full expressions so
+        # SQLite (which disallows alias references in window ORDER BY) doesn't error.
         if wf.order_by:
             ob_parts = []
             for item in wf.order_by:
-                col = self._resolve_column_table(item.column, views)
-                ob_parts.append(f"{col} {item.direction}")
+                if item.column in agg_expr_map:
+                    col_expr = agg_expr_map[item.column]
+                else:
+                    col_expr = self._resolve_column_table(item.column, views)
+                ob_parts.append(f"{col_expr} {item.direction}")
             order_clause = f"ORDER BY {', '.join(ob_parts)}"
         else:
             order_clause = ""

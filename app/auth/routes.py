@@ -18,6 +18,7 @@ import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
+from app.auth.constants import OAUTH_ONLY_SENTINEL
 from app.auth.dependencies import get_optional_current_user
 from app.auth.jwt import create_access_token
 from app.auth.store import AuthStore, User, get_auth_store
@@ -47,12 +48,9 @@ def _hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 
-_OAUTH_ONLY_SENTINEL = "<oauth_only>"
-
-
 def _verify_password(password: str, hashed: str) -> bool:
     # OAuth-only accounts have no stored password — never allow password login.
-    if not hashed or hashed == _OAUTH_ONLY_SENTINEL:
+    if not hashed or hashed == OAUTH_ONLY_SENTINEL:
         return False
     try:
         return bcrypt.checkpw(password.encode(), hashed.encode())

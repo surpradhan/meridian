@@ -596,10 +596,14 @@ class Orchestrator:
     # Phase 7: Dynamic domain hot-reload
     # ------------------------------------------------------------------
 
-    def reload_domain_agents(self) -> None:
+    def reload_domain_agents(self) -> bool:
         """
         Reload dynamic domains from the DomainRegistry and merge them into
         self.domain_agents.  Called after an admin registers or deletes a domain.
+
+        Returns:
+            True if reload succeeded, False if it failed (failure is also logged
+            at ERROR level so it appears in monitoring dashboards).
         """
         try:
             from app.onboarding.registry import get_domain_registry
@@ -618,8 +622,10 @@ class Orchestrator:
                 if name not in builtin and name not in dynamic_names:
                     del self.domain_agents[name]
                     logger.info(f"Removed stale dynamic domain agent: {name!r}")
+            return True
         except Exception as e:
-            logger.warning(f"reload_domain_agents failed: {e}")
+            logger.error("reload_domain_agents failed: %s", e, exc_info=True)
+            return False
 
 
 # ------------------------------------------------------------------
