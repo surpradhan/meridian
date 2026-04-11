@@ -321,6 +321,8 @@ class BaseDomainAgent(ABC):
             ValueError: If query is invalid
             Exception: If database execution fails
         """
+        import time
+
         # Validate views
         is_valid, msg = self.registry.validate_view_combination(request.selected_views)
         if not is_valid:
@@ -330,8 +332,23 @@ class BaseDomainAgent(ABC):
         sql, params = self.builder.build_query_parameterized(request)
         logger.info(f"Executing query: {sql}  params={params}")
 
-        # Execute query with bound parameters
+        # Execute query with bound parameters, measuring elapsed time
+        t0 = time.monotonic()
         results = self.db.execute_query(sql, params if params else None)
+        elapsed_ms = (time.monotonic() - t0) * 1000
+
+        # Phase 7: record to index optimizer (non-critical)
+        try:
+            from app.database.index_optimizer import get_optimizer
+            primary_view = request.selected_views[0] if request.selected_views else "unknown"
+            filter_cols = list((request.filters or {}).keys())
+            get_optimizer().analyzer.record_query(
+                table=primary_view,
+                columns=filter_cols,
+                execution_time_ms=elapsed_ms,
+            )
+        except Exception:
+            pass  # optimizer errors must never break query execution
 
         return {
             "result": results,

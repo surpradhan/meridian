@@ -82,10 +82,10 @@ _init_attempted: bool = False
 
 def get_llm() -> Optional[object]:
     """
-    Return the shared ChatOpenAI client, initializing it on first call.
+    Return the shared LLM client, initializing it on first call.
 
-    Returns None (and logs a warning) if the OpenAI API key is not set
-    or if the langchain_openai package is unavailable.
+    Provider priority: Groq (if GROQ_API_KEY is set) → OpenAI (if OPENAI_API_KEY is set).
+    Returns None if neither key is configured.
     """
     global _client, _init_attempted
     if _init_attempted:
@@ -94,16 +94,25 @@ def get_llm() -> Optional[object]:
     _init_attempted = True
     try:
         from app.config import settings
-        if not settings.openai_api_key:
-            logger.debug("No OpenAI API key configured; LLM features disabled")
-            return None
-        from langchain_openai import ChatOpenAI
-        _client = ChatOpenAI(
-            model=settings.openai_model,
-            api_key=settings.openai_api_key,
-            temperature=0,
-        )
-        logger.info(f"Shared LLM client initialized (model: {settings.openai_model})")
+
+        if settings.groq_api_key:
+            from langchain_groq import ChatGroq
+            _client = ChatGroq(
+                model=settings.groq_model,
+                api_key=settings.groq_api_key,
+                temperature=0,
+            )
+            logger.info(f"Shared LLM client initialized (provider: Groq, model: {settings.groq_model})")
+        elif settings.openai_api_key:
+            from langchain_openai import ChatOpenAI
+            _client = ChatOpenAI(
+                model=settings.openai_model,
+                api_key=settings.openai_api_key,
+                temperature=0,
+            )
+            logger.info(f"Shared LLM client initialized (provider: OpenAI, model: {settings.openai_model})")
+        else:
+            logger.debug("No LLM API key configured (GROQ_API_KEY or OPENAI_API_KEY); LLM features disabled")
     except Exception as e:
         logger.warning(f"LLM client initialization failed: {e}")
 

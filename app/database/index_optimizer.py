@@ -6,6 +6,7 @@ Tracks slow queries and suggests optimal indexing strategies.
 """
 
 import logging
+import threading
 from typing import Dict, List, Any, Optional, Set
 from collections import defaultdict
 from dataclasses import dataclass
@@ -237,6 +238,7 @@ class IndexOptimizer:
     def __init__(self):
         self.analyzer = QueryAnalyzer()
 
+
     def analyze_workload(self) -> Dict[str, Any]:
         """Analyze current workload and provide recommendations.
 
@@ -312,3 +314,21 @@ class IndexOptimizer:
             )
 
         return tips
+
+
+# ------------------------------------------------------------------
+# Module-level singleton (Phase 7)
+# ------------------------------------------------------------------
+
+_optimizer: Optional["IndexOptimizer"] = None
+_optimizer_lock = threading.Lock()
+
+
+def get_optimizer() -> "IndexOptimizer":
+    """Return (or create) the module-level IndexOptimizer singleton."""
+    global _optimizer
+    if _optimizer is None:
+        with _optimizer_lock:
+            if _optimizer is None:
+                _optimizer = IndexOptimizer()
+    return _optimizer

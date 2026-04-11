@@ -42,7 +42,9 @@ make install-dev
 
 # Configure environment
 cp .env.example .env.local
-export OPENAI_API_KEY="sk-your-key"
+# Set your LLM key (Groq preferred, OpenAI as fallback):
+export GROQ_API_KEY="gsk-your-key"
+# or: export OPENAI_API_KEY="sk-your-key"
 ```
 
 ### 2. Run Tests
@@ -95,14 +97,18 @@ meridian/
 │   ├── api/         # REST API endpoints
 │   ├── agents/      # AI agents (Langchain-based)
 │   ├── tools/       # Langchain tool definitions
-│   ├── views/       # Data view metadata (Phase 1)
-│   ├── query/       # Query building, validation & time intelligence (Phase 2-3, 6)
-│   ├── visualization/ # Chart-type hints for query results (Phase 6)
-│   ├── database/    # Database layer
+│   ├── views/       # Data view metadata
+│   ├── query/       # Query building, validation & time intelligence
+│   ├── visualization/ # Chart-type hints for query results
+│   ├── jobs/        # Async job queue & status store (Phase 7)
+│   ├── export/      # JSON / CSV / Excel exporters (Phase 7)
+│   ├── explain/     # Query explain response builder (Phase 7)
+│   ├── onboarding/  # Self-service domain registry (Phase 7)
+│   ├── database/    # Database layer + index advisor
 │   ├── observability/ # Logging & tracing
 │   └── core/        # Shared utilities & exceptions
 │
-├── tests/            # Test suite (unit, integration, e2e)
+├── tests/            # Test suite (unit, integration, performance)
 ├── docs/             # Documentation
 ├── scripts/          # Utility scripts
 ├── docker/           # Docker configuration
@@ -132,8 +138,8 @@ JWT-based auth scaffolding, audit logging structure, CORS configuration, API key
 ### Phase 6: Advanced Query Capabilities — ✅ COMPLETED
 Parameterized queries (SQL injection prevention), HAVING clauses with operator whitelisting, window functions (ROW_NUMBER, RANK, SUM, etc.) with Pydantic validation, CTEs, ORDER BY, multi-hop BFS join pathfinding, time intelligence ("last quarter", "ytd", "trailing 30 days"), and auto-visualization hints (line/bar/pie/table). 65 new tests. **441+ tests total passing.**
 
-### Phase 7: Scale & Polish (Weeks 17–20)
-Streaming responses, async execution, self-service domain onboarding, export options, load testing.
+### Phase 7: Scale & Polish — ✅ COMPLETED
+Async query execution with job polling, SSE streaming responses, self-service domain onboarding (register new domains via API without code changes), JSON/CSV/Excel export, query explain mode (routing decision + SQL + filters), index advisor wired into query path, load testing suite, and full API documentation. Multi-LLM provider support (Groq + OpenAI). **522+ tests passing.**
 
 ---
 
@@ -167,11 +173,11 @@ make help             # Show all available commands
 
 ## Documentation
 
-- **[Setup Guide](docs/SETUP.md)** - Local development setup
-- **[Architecture](docs/ARCHITECTURE.md)** - System design details
-- **[API Documentation](docs/API.md)** - REST API endpoints
-- **[Implementation Roadmap](docs/MULTI_AGENT_PROTOTYPE_ROADMAP_v2.md)** - Phase breakdown & code
-- **[Contributing](docs/CONTRIBUTING.md)** - Development guidelines
+- **[Architecture](docs/ARCHITECTURE.md)** — System design, components, data flow
+- **[API Reference](docs/API.md)** — All endpoints with request/response schemas
+- **[Benchmarks](docs/BENCHMARKS.md)** — Performance targets and load test guide
+- **[Changelog](docs/CHANGELOG.md)** — What changed in each version
+- **[Roadmap](docs/MULTI_AGENT_PROTOTYPE_ROADMAP_v2.md)** — Phase-by-phase design rationale
 
 ---
 
@@ -182,7 +188,7 @@ make help             # Show all available commands
 | **UI** | Gradio | Interactive web interface |
 | **API** | FastAPI | REST API |
 | **AI/Agents** | Langchain + Langraph | Agent framework & orchestration |
-| **LLM** | OpenAI GPT-4 | Language model |
+| **LLM** | Groq / OpenAI (configurable) | Language model (Groq preferred, OpenAI fallback) |
 | **Database** | SQLAlchemy + PostgreSQL | Data layer |
 | **Observability** | Langsmith + OpenTelemetry | Tracing & monitoring |
 | **Development** | Pytest + Black + MyPy | Testing & quality |
@@ -196,8 +202,12 @@ Configuration is managed through environment variables and `.env` files.
 ### Key Settings
 
 ```bash
-# OpenAI (Required)
-OPENAI_API_KEY=sk-...
+# LLM Provider — Groq takes priority when set; OpenAI is the fallback
+GROQ_API_KEY=gsk-...          # Preferred
+GROQ_MODEL=llama-3.3-70b-versatile
+
+OPENAI_API_KEY=sk-...         # Fallback
+OPENAI_MODEL=gpt-4
 
 # Database
 DATABASE_URL=postgresql://user:pass@localhost:5432/meridian_dev
@@ -250,14 +260,14 @@ docker run -p 8000:8000 -e OPENAI_API_KEY=sk-... meridian:latest
 ```
 
 ### Production
-See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for cloud deployment (AWS, GCP, Azure).
+See the [Architecture doc](docs/ARCHITECTURE.md) for deployment topology notes.
 
 ---
 
 ## Development Status
 
-- **Current Phase:** Phase 6 (Advanced Query Capabilities) COMPLETE → Next: Phase 7 (Scale & Polish)
-- **Version:** 0.6.0
+- **Current Phase:** Phase 7 (Scale & Polish) COMPLETE — all 7 phases done
+- **Version:** 0.7.0
 - **Python:** 3.11+
 - **License:** MIT
 
@@ -265,7 +275,7 @@ See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for cloud deployment (AWS, GCP, Azu
 
 ## Contributing
 
-We welcome contributions! See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for guidelines.
+We welcome contributions! Open an issue or pull request on GitHub.
 
 ---
 

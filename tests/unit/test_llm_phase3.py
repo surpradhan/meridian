@@ -268,11 +268,12 @@ class TestSharedLLMClientSingleton:
         assert get_llm() is fake  # second call returns the exact same instance
 
     def test_returns_none_when_api_key_not_set(self):
-        """get_llm() returns None in the test environment (no API key, no package)."""
+        """get_llm() returns None when neither Groq nor OpenAI key is configured."""
+        from unittest.mock import patch
         from app.agents.llm_client import get_llm
-        # The autouse fixture already reset the singleton; calling get_llm() with
-        # no key configured (test env) and no langchain_openai installed → None.
-        result = get_llm()
+        with patch("app.config.settings.groq_api_key", ""), \
+             patch("app.config.settings.openai_api_key", ""):
+            result = get_llm()
         assert result is None
 
     def test_reset_allows_reinitialization(self):
