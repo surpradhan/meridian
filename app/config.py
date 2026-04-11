@@ -95,6 +95,24 @@ class Settings(BaseSettings):
         case_sensitive = False
 
     @model_validator(mode="after")
+    def validate_oidc_config(self) -> "Settings":
+        """Ensure OIDC settings are either all present or all absent."""
+        oidc_fields = {
+            "oidc_client_id": self.oidc_client_id,
+            "oidc_client_secret": self.oidc_client_secret,
+            "oidc_issuer": self.oidc_issuer,
+        }
+        provided = {k for k, v in oidc_fields.items() if v}
+        if provided and provided != set(oidc_fields):
+            missing = sorted(set(oidc_fields) - provided)
+            raise ValueError(
+                f"Incomplete OIDC configuration: {missing} must also be set when using OIDC. "
+                "Either configure all three (OIDC_CLIENT_ID, OIDC_CLIENT_SECRET, OIDC_ISSUER) "
+                "or leave all unset."
+            )
+        return self
+
+    @model_validator(mode="after")
     def validate_production_security(self) -> "Settings":
         """Catch dangerous misconfigurations before the app starts."""
         if self.environment != "production":

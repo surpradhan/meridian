@@ -122,3 +122,27 @@ class TestValidateSqlSyntax:
         )
         valid, errors = validator.validate_sql_syntax(sql)
         assert valid is True
+
+    def test_leading_whitespace_and_newlines(self, validator):
+        """SQL with leading whitespace must not break the EXPLAIN prefix."""
+        sql = "\n\n  SELECT id FROM sales WHERE region = ? LIMIT 10"
+        valid, errors = validator.validate_sql_syntax(sql, params=["WEST"])
+        assert valid is True
+        assert errors == []
+
+    def test_trailing_whitespace(self, validator):
+        sql = "SELECT 1   \n\t"
+        valid, errors = validator.validate_sql_syntax(sql)
+        assert valid is True
+
+    def test_sql_with_inline_comment(self, validator):
+        """SQLite allows -- comments; EXPLAIN should handle them fine."""
+        sql = "SELECT id -- fetch the id\nFROM t LIMIT 5"
+        valid, errors = validator.validate_sql_syntax(sql)
+        assert valid is True
+
+    def test_syntax_error_still_caught_after_whitespace(self, validator):
+        """Stripping whitespace must not hide real syntax errors."""
+        sql = "  \n  SELEKT id FROM t"
+        valid, errors = validator.validate_sql_syntax(sql)
+        assert valid is False

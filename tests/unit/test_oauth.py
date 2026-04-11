@@ -291,3 +291,136 @@ class TestSafeUsername:
         store.user_exists.side_effect = [True, False]
         result = _safe_username("Alice", "alice@x.com", store)
         assert result == "alice_1"
+
+    def test_empty_name_and_empty_email_falls_back_to_user(self):
+        """When both name and email are absent, fall back to 'user'."""
+        store = MagicMock(spec=AuthStore)
+        store.user_exists.return_value = False
+        assert _safe_username("", "", store) == "user"
+
+
+# ---------------------------------------------------------------------------
+# OIDC discovery endpoint resolution
+# ---------------------------------------------------------------------------
+
+
+class TestOidcDiscovery:
+    def setup_method(self):
+        _STATE_STORE.clear()
+
+    def teardown_method(self):
+        _STATE_STORE.clear()
+
+    async def test_resolve_oidc_endpoints_uses_well_known_url(self):
+        """Discovery document is fetched from <issuer>/.well-known/openid-configuration."""
+        settings = _make_settings(
+            oidc_client_id="oidc-id",
+            oidc_client_secret="oidc-sec",
+            oidc_issuer="https://sso.example.com",
+        )
+        mgr = OAuthManager(settings)
+
+        discovery_doc = {
+            "authorization_endpoint": "https://sso.example.com/authorize",
+            "token_endpoint": "https://sso.example.com/token",
+            "userinfo_endpoint": "https://sso.example.com/userinfo",
+        }
+
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = discovery_doc
+
+        mock_http = AsyncMock()
+        mock_http.get = AsyncMock(return_value=mock_resp)
+
+        with patch("app.auth.oauth.httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_http)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            endpoints = await mgr._resolve_oidc_endpoints()
+
+        assert endpoints["authorization_url"] == "https://sso.example.com/authorize"
+        assert endpoints["token_url"] == "https://sso.example.com/token"
+        mock_http.get.assert_called_once()
+        call_url = mock_http.get.call_args[0][0]
+        assert call_url == "https://sso.example.com/.well-known/openid-configuration"
+
+    async def test_resolve_oidc_endpoints_raises_without_issuer(self):
+        settings = _make_settings(oidc_issuer=None)
+        mgr = OAuthManager(settings)
+        with pytest.raises(ValueError, match="OIDC_ISSUER"):
+            await mgr._resolve_oidc_endpoints()
+
+    async def test_oidc_authorize_url_built_from_discovery(self):
+        """get_authorize_url_async for 'oidc' resolves endpoints and builds a valid URL."""
+        settings = _make_settings(
+            oidc_client_id="oidc-id",
+            oidc_client_secret="oidc-sec",
+            oidc_issuer="https://sso.example.com",
+        )
+        mgr = OAuthManager(settings)
+
+        discovery_doc = {
+            "authorization_endpoint": "https://sso.example.com/authorize",
+            "token_endpoint": "https://sso.example.com/token",
+            "userinfo_endpoint": "https://sso.example.com/userinfo",
+        }
+
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = discovery_doc
+
+        mock_http = AsyncMock()
+        mock_http.get = AsyncMock(return_value=mock_resp)
+
+        with patch("app.auth.oauth.httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_http)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            url, state = await mgr.get_authorize_url_async("oidc", "http://localhost:8000/callback")
+
+        assert "sso.example.com/authorize" in url
+        assert "client_id=oidc-id" in url
+        assert len(state) > 20
+
+
+# ---------------------------------------------------------------------------
+# Email None guard in handle_callback
+# ---------------------------------------------------------------------------
+
+
+class TestHandleCallbackEmailGuard:
+    def setup_method(self):
+        _STATE_STORE.clear()
+
+    def teardown_method(self):
+        _STATE_STORE.clear()
+
+    async def test_missing_email_claim_does_not_crash(self):
+        """userinfo without 'email' should not raise AttributeError."""
+        state = _store_state("google")
+        mgr = OAuthManager(_make_settings())
+        store = _make_store()
+
+        mock_token_resp = MagicMock()
+        mock_token_resp.raise_for_status = MagicMock()
+        mock_token_resp.json.return_value = {"access_token": "tok"}
+
+        # No email or name — only sub
+        mock_userinfo_resp = MagicMock()
+        mock_userinfo_resp.raise_for_status = MagicMock()
+        mock_userinfo_resp.json.return_value = {"sub": "no-email-user"}
+
+        mock_http = AsyncMock()
+        mock_http.post = AsyncMock(return_value=mock_token_resp)
+        mock_http.get = AsyncMock(return_value=mock_userinfo_resp)
+
+        with patch("app.auth.oauth.httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_http)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            # Should not raise — user is provisioned without email
+            jwt = await mgr.handle_callback(
+                "google", "auth-code", state, "http://localhost:8000/callback", store
+            )
+
+        assert jwt
+        call_kwargs = store.create_oauth_user.call_args
+        assert call_kwargs.kwargs["email"] == ""

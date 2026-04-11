@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Optional
 
+from app.auth.constants import OAUTH_ONLY_SENTINEL
+
 logger = logging.getLogger(__name__)
 
 _CREATE_USERS_SQL = """
@@ -249,16 +251,16 @@ class AuthStore:
                 INSERT INTO users
                     (id, username, email, password_hash, role, allowed_domains, is_active, created_at,
                      oauth_provider, oauth_subject)
-                VALUES (?, ?, ?, '<oauth_only>', ?, ?, 1, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
                 """,
-                (user_id, username, email, role, domains_json, now, provider, subject),
+                (user_id, username, email, OAUTH_ONLY_SENTINEL, role, domains_json, now, provider, subject),
             )
             self._conn.commit()
         return User(
             id=user_id,
             username=username,
             email=email,
-            password_hash="<oauth_only>",
+            password_hash=OAUTH_ONLY_SENTINEL,
             role=role,
             allowed_domains=allowed_domains or [],
             is_active=True,

@@ -145,9 +145,17 @@ def _reload_orchestrator() -> Optional[str]:
         from app.agents.orchestrator import _get_shared_orchestrator
         orch = _get_shared_orchestrator()
         if orch is not None:
-            orch.reload_domain_agents()
+            success = orch.reload_domain_agents()
+            if not success:
+                msg = (
+                    "Domain saved, but orchestrator hot-reload failed — "
+                    "check server logs for details. "
+                    "The new domain will be active after the next restart."
+                )
+                logger.error(msg)
+                return msg
         return None
     except Exception as e:
-        msg = f"Domain saved, but orchestrator hot-reload failed: {e}. The new domain will be active after next restart."
-        logger.warning(msg)
+        msg = f"Domain saved, but orchestrator hot-reload raised an unexpected error: {e}. The new domain will be active after next restart."
+        logger.error(msg, exc_info=True)
         return msg

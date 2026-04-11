@@ -7,11 +7,30 @@ Implements multiple validation rules to prevent errors and optimize performance.
 
 import logging
 import sqlite3
+import threading
 from typing import List, Optional, Tuple, Dict, Any
 from app.views.models import QueryRequest
 from app.views.registry import ViewRegistry
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Module-level singleton in-memory SQLite connection for syntax checking.
+# Re-using a single connection avoids the overhead of opening/closing a new
+# DB file descriptor on every validate_sql_syntax() call.
+# check_same_thread=False is safe because all access is protected by _SYNTAX_LOCK.
+# ---------------------------------------------------------------------------
+_SYNTAX_CONN: Optional[sqlite3.Connection] = None
+_SYNTAX_LOCK = threading.Lock()
+
+
+def _get_syntax_conn() -> sqlite3.Connection:
+    global _SYNTAX_CONN
+    if _SYNTAX_CONN is None:
+        with _SYNTAX_LOCK:
+            if _SYNTAX_CONN is None:
+                _SYNTAX_CONN = sqlite3.connect(":memory:", check_same_thread=False)
+    return _SYNTAX_CONN
 
 
 class QueryValidator:
@@ -259,22 +278,27 @@ class QueryValidator:
         Returns:
             Tuple of (is_valid, error_messages)
         """
-        stripped = sql.strip().upper()
+        # Strip leading/trailing whitespace so the EXPLAIN prefix is always valid
+        # even when the SQL starts with newlines or spaces.
+        sql_stripped = sql.strip()
+        upper = sql_stripped.upper()
+
         # SQLite's EXPLAIN does not support DDL (CREATE/ALTER/DROP).
         # Skip those to avoid false negatives; everything else (SELECT, WITH, SELEKT…)
         # goes through EXPLAIN so genuine parse errors are caught.
         _DDL_PREFIXES = ("CREATE ", "ALTER ", "DROP ", "INSERT ", "UPDATE ", "DELETE ")
-        if any(stripped.startswith(p) for p in _DDL_PREFIXES):
+        if any(upper.startswith(p) for p in _DDL_PREFIXES):
             return True, []
 
         # Count ? placeholders in the SQL to create a correctly-sized dummy params list.
         # The builder never puts ? inside string literals, so a simple count is reliable.
-        placeholder_count = sql.count("?")
+        placeholder_count = sql_stripped.count("?")
         dummy_params = [None] * placeholder_count
 
-        conn = sqlite3.connect(":memory:")
+        conn = _get_syntax_conn()
         try:
-            conn.execute(f"EXPLAIN {sql}", dummy_params)
+            with _SYNTAX_LOCK:
+                conn.execute(f"EXPLAIN {sql_stripped}", dummy_params)
             return True, []
         except sqlite3.OperationalError as e:
             msg = str(e).lower()
@@ -284,13 +308,14 @@ class QueryValidator:
             return False, [f"SQL syntax error: {e}"]
         except Exception as e:
             # Unexpected exceptions (e.g. ProgrammingError) indicate a validator bug.
-            # Log loudly but fail open — don't block legitimate queries due to our bug.
-            logger.warning(
-                f"SQL syntax check raised unexpected error (failing open): {type(e).__name__}: {e}"
+            # Log at ERROR level and fail open — don't block legitimate queries due to our bug.
+            logger.error(
+                "SQL syntax check raised unexpected error (failing open): %s: %s",
+                type(e).__name__,
+                e,
+                exc_info=True,
             )
             return True, []
-        finally:
-            conn.close()
 
     def get_validation_warnings(self, request: QueryRequest) -> List[str]:
         """
@@ -357,6 +382,13 @@ def get_validator(registry: ViewRegistry = None) -> QueryValidator:
 
 
 def reset_validator() -> None:
-    """Reset the global validator instance."""
-    global _validator_instance
+    """Reset the global validator instance (and syntax-check connection, for tests)."""
+    global _validator_instance, _SYNTAX_CONN
     _validator_instance = None
+    with _SYNTAX_LOCK:
+        if _SYNTAX_CONN is not None:
+            try:
+                _SYNTAX_CONN.close()
+            except Exception:
+                pass
+            _SYNTAX_CONN = None
