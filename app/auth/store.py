@@ -30,9 +30,17 @@ CREATE TABLE IF NOT EXISTS users (
     role            TEXT NOT NULL DEFAULT 'viewer',
     allowed_domains TEXT NOT NULL DEFAULT '[]',
     is_active       INTEGER NOT NULL DEFAULT 1,
-    created_at      TEXT NOT NULL
+    created_at      TEXT NOT NULL,
+    oauth_provider  TEXT,
+    oauth_subject   TEXT
 );
 """
+
+# Migration: add OAuth columns to existing databases (idempotent — fails silently if column exists)
+_MIGRATE_OAUTH_SQL = [
+    "ALTER TABLE users ADD COLUMN oauth_provider TEXT",
+    "ALTER TABLE users ADD COLUMN oauth_subject TEXT",
+]
 
 _CREATE_AUDIT_SQL = """
 CREATE TABLE IF NOT EXISTS audit_log (
@@ -64,6 +72,8 @@ class User:
     allowed_domains: List[str]
     is_active: bool
     created_at: str
+    oauth_provider: Optional[str] = None
+    oauth_subject: Optional[str] = None
 
     def can_access_domain(self, domain: str) -> bool:
         """Check domain access.
@@ -118,6 +128,14 @@ class AuthStore:
             for stmt in _AUDIT_INDEX_SQL.strip().split("\n"):
                 if stmt.strip():
                     self._conn.execute(stmt)
+            # Migrate existing databases to add OAuth columns (idempotent).
+            # Only ignore "duplicate column name" errors — let real failures propagate.
+            for stmt in _MIGRATE_OAUTH_SQL:
+                try:
+                    self._conn.execute(stmt)
+                except sqlite3.OperationalError as e:
+                    if "duplicate column name" not in str(e).lower():
+                        raise
             self._conn.commit()
 
     # ------------------------------------------------------------------
@@ -185,15 +203,68 @@ class AuthStore:
         return row[0] if row else 0
 
     def _row_to_user(self, row: sqlite3.Row) -> User:
+        row_dict = dict(row)
         return User(
-            id=row["id"],
-            username=row["username"],
-            email=row["email"],
-            password_hash=row["password_hash"],
-            role=row["role"],
-            allowed_domains=json.loads(row["allowed_domains"] or "[]"),
-            is_active=bool(row["is_active"]),
-            created_at=row["created_at"],
+            id=row_dict["id"],
+            username=row_dict["username"],
+            email=row_dict["email"],
+            password_hash=row_dict["password_hash"],
+            role=row_dict["role"],
+            allowed_domains=json.loads(row_dict["allowed_domains"] or "[]"),
+            is_active=bool(row_dict["is_active"]),
+            created_at=row_dict["created_at"],
+            oauth_provider=row_dict.get("oauth_provider"),
+            oauth_subject=row_dict.get("oauth_subject"),
+        )
+
+    # ------------------------------------------------------------------
+    # OAuth user management
+    # ------------------------------------------------------------------
+
+    def get_user_by_oauth(self, provider: str, subject: str) -> Optional[User]:
+        """Look up a user by OAuth provider + subject (the provider's user ID)."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM users WHERE oauth_provider = ? AND oauth_subject = ? AND is_active = 1",
+                (provider, subject),
+            ).fetchone()
+        return self._row_to_user(row) if row else None
+
+    def create_oauth_user(
+        self,
+        username: str,
+        email: str,
+        provider: str,
+        subject: str,
+        role: str = "viewer",
+        allowed_domains: Optional[List[str]] = None,
+    ) -> User:
+        """Create a user provisioned via OAuth (no password)."""
+        user_id = str(uuid.uuid4())
+        now = datetime.utcnow().isoformat()
+        domains_json = json.dumps(allowed_domains or [])
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO users
+                    (id, username, email, password_hash, role, allowed_domains, is_active, created_at,
+                     oauth_provider, oauth_subject)
+                VALUES (?, ?, ?, '<oauth_only>', ?, ?, 1, ?, ?, ?)
+                """,
+                (user_id, username, email, role, domains_json, now, provider, subject),
+            )
+            self._conn.commit()
+        return User(
+            id=user_id,
+            username=username,
+            email=email,
+            password_hash="<oauth_only>",
+            role=role,
+            allowed_domains=allowed_domains or [],
+            is_active=True,
+            created_at=now,
+            oauth_provider=provider,
+            oauth_subject=subject,
         )
 
     # ------------------------------------------------------------------

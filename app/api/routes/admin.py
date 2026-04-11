@@ -91,6 +91,26 @@ async def delete_domain(
 
 
 # ------------------------------------------------------------------
+# Metrics
+# ------------------------------------------------------------------
+
+
+@router.get("/metrics")
+async def get_metrics(
+    current_user: User = Depends(_require_admin),
+) -> Dict[str, Any]:
+    """
+    Return in-memory application metrics (query counters, histograms, gauges).
+
+    Metrics are collected by ``MetricsCollector`` and ``QueryMetrics`` during
+    normal query processing.  The response is a JSON snapshot; counters reset
+    when the process restarts.
+    """
+    from app.observability.metrics import get_metrics_collector
+    return get_metrics_collector().get_summary()
+
+
+# ------------------------------------------------------------------
 # Performance / Index Advisor
 # ------------------------------------------------------------------
 

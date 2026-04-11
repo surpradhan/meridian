@@ -47,7 +47,13 @@ def _hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 
+_OAUTH_ONLY_SENTINEL = "<oauth_only>"
+
+
 def _verify_password(password: str, hashed: str) -> bool:
+    # OAuth-only accounts have no stored password — never allow password login.
+    if not hashed or hashed == _OAUTH_ONLY_SENTINEL:
+        return False
     try:
         return bcrypt.checkpw(password.encode(), hashed.encode())
     except Exception:
@@ -224,6 +230,114 @@ async def login(
         client_ip=client_ip,
     )
     logger.info(f"User {user.username!r} logged in from {client_ip}")
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "expires_in_hours": _jwt_settings().jwt_expiration_hours,
+    }
+
+
+_SUPPORTED_OAUTH_PROVIDERS = frozenset({"google", "oidc"})
+
+
+@router.get("/oauth/authorize")
+async def oauth_authorize(
+    provider: str,
+    request: Request,
+    store: AuthStore = Depends(get_auth_store),
+) -> Dict[str, Any]:
+    """
+    Begin an OAuth2 / OIDC authorization code flow.
+
+    Returns a redirect URL that the client should navigate to.  Supported
+    providers: ``google``, ``oidc`` (requires OIDC_ISSUER to be configured).
+
+    Example:
+        GET /api/auth/oauth/authorize?provider=google
+        → {"redirect_url": "https://accounts.google.com/o/oauth2/v2/auth?..."}
+    """
+    if provider not in _SUPPORTED_OAUTH_PROVIDERS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported OAuth provider: {provider!r}. Supported: {sorted(_SUPPORTED_OAUTH_PROVIDERS)}",
+        )
+
+    from app.auth.oauth import get_oauth_manager
+    from app.config import settings
+
+    redirect_uri = f"{settings.oauth_redirect_base_url}/api/auth/oauth/callback"
+    manager = get_oauth_manager()
+    try:
+        if provider == "oidc":
+            url, state = await manager.get_authorize_url_async(provider, redirect_uri)
+        else:
+            url, state = manager.get_authorize_url(provider, redirect_uri)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    store.log_audit(
+        action="auth.oauth.authorize",
+        resource=f"/api/auth/oauth/authorize?provider={provider}",
+        client_ip=request.client.host if request.client else "unknown",
+        status_code=200,
+    )
+    return {"redirect_url": url, "state": state, "provider": provider}
+
+
+@router.get("/oauth/callback")
+async def oauth_callback(
+    provider: str,
+    code: str,
+    state: str,
+    request: Request,
+    store: AuthStore = Depends(get_auth_store),
+) -> Dict[str, Any]:
+    """
+    Handle the OAuth2 / OIDC authorization code callback.
+
+    Exchanges the authorization code for tokens, validates the identity, and
+    returns a Meridian JWT access token.  New users are auto-provisioned as
+    ``viewer`` with no domain access; an admin must grant permissions afterwards.
+    """
+    if provider not in _SUPPORTED_OAUTH_PROVIDERS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported OAuth provider: {provider!r}",
+        )
+
+    from app.auth.oauth import get_oauth_manager
+    from app.config import settings
+    from app.auth.jwt import _settings as _jwt_settings
+
+    redirect_uri = f"{settings.oauth_redirect_base_url}/api/auth/oauth/callback"
+    manager = get_oauth_manager()
+    client_ip = request.client.host if request.client else "unknown"
+    try:
+        token = await manager.handle_callback(provider, code, state, redirect_uri, store)
+    except ValueError as e:
+        store.log_audit(
+            action="auth.oauth.callback.failed",
+            resource="/api/auth/oauth/callback",
+            client_ip=client_ip,
+            status_code=401,
+        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
+    except Exception as e:
+        logger.error(f"OAuth callback error for provider={provider!r}: {e}")
+        store.log_audit(
+            action="auth.oauth.callback.error",
+            resource="/api/auth/oauth/callback",
+            client_ip=client_ip,
+            status_code=502,
+        )
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="OAuth provider error")
+
+    store.log_audit(
+        action="auth.oauth.login",
+        resource="/api/auth/oauth/callback",
+        client_ip=client_ip,
+        status_code=200,
+    )
     return {
         "access_token": token,
         "token_type": "bearer",
