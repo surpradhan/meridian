@@ -571,6 +571,10 @@ def build_ui() -> gr.Blocks:
                         visible=False,
                     )
 
+                with gr.Row():
+                    export_json_btn = gr.Button("Export JSON", size="sm", visible=False)
+                    export_excel_btn = gr.Button("Export Excel", size="sm", visible=False)
+
                 # Phase 7: Explain panel
                 explain_panel = gr.JSON(
                     label="Query Explanation",
@@ -607,8 +611,11 @@ def build_ui() -> gr.Blocks:
                 gr.Markdown("---")
 
                 with gr.Accordion("Recent Queries", open=True):
-                    history_display = gr.HTML(
-                        value='<p class="history-empty">No queries yet</p>',
+                    history_display = gr.Dataframe(
+                        headers=["Recent Queries"],
+                        datatype=["str"],
+                        interactive=False,
+                        wrap=True,
                         label="",
                     )
 
@@ -625,23 +632,38 @@ def build_ui() -> gr.Blocks:
 
         MAX_HISTORY = 10
 
-        def build_history_html(history: list) -> str:
+        def build_history_data(history: list) -> list:
+            """Return history as a list-of-lists for gr.Dataframe."""
             if not history:
-                return '<p class="history-empty">No queries yet</p>'
-            import html as _h
-            items = ""
-            for q in reversed(history):
-                safe = _h.escape(q)
-                label = (q[:42] + "…") if len(q) > 42 else q
-                safe_label = _h.escape(label)
-                items += (
-                    f'<button class="history-item" title="{safe}">'
-                    f'{safe_label}</button>\n'
-                )
-            return items
+                return []
+            return [[q] for q in reversed(history)]
 
         def run_query(question_val, domain_val, show_sql_val, show_explain_val, history_val, conv_id):
             """Run a query; update all outputs, history panel, and button state."""
+            if not question_val or not question_val.strip():
+                return (
+                    gr.update(),                                         # results_table (no change)
+                    gr.update(),                                         # results_plot
+                    "",                                                  # error_box
+                    gr.update(),                                         # welcome_group
+                    "",                                                  # metadata
+                    gr.update(),                                         # download_file
+                    gr.update(),                                         # download_json
+                    gr.update(),                                         # download_excel
+                    gr.update(),                                         # explain_panel
+                    gr.update(),                                         # suggestions_group
+                    gr.update(),                                         # sugg_btn_0
+                    gr.update(),                                         # sugg_btn_1
+                    gr.update(),                                         # sugg_btn_2
+                    gr.update(),                                         # export_json_btn
+                    gr.update(),                                         # export_excel_btn
+                    gr.update(value="Ask", interactive=True),            # submit_btn
+                    history_val,                                         # history_state
+                    [[q] for q in reversed(history_val)] if history_val else [],  # history_display
+                    conv_id,                                             # conversation_state
+                    gr.update(),                                         # suggestions_state
+                    gr.update(),                                         # raw_rows_state
+                )
             df, error_html, meta_html, csv_path, sugg_list, new_conv_id, explain_data, viz = process_query(
                 question_val, domain_val, show_sql_val,
                 show_explain=show_explain_val, conversation_id=conv_id,
@@ -685,9 +707,11 @@ def build_ui() -> gr.Blocks:
                 gr.update(value=s0, visible=bool(s0)),                  # sugg_btn_0
                 gr.update(value=s1, visible=bool(s1)),                  # sugg_btn_1
                 gr.update(value=s2, visible=bool(s2)),                  # sugg_btn_2
+                gr.update(visible=bool(raw_rows)),                      # export_json_btn
+                gr.update(visible=bool(raw_rows)),                      # export_excel_btn
                 gr.update(value="Ask", interactive=True),               # submit_btn
                 new_history,                                             # history_state
-                build_history_html(new_history),                        # history_display
+                build_history_data(new_history),                        # history_display
                 new_conv_id,                                             # conversation_state
                 sugg_list,                                               # suggestions_state
                 raw_rows,                                                # raw_rows_state
@@ -709,6 +733,8 @@ def build_ui() -> gr.Blocks:
                 gr.update(value="", visible=False),                 # sugg_btn_0
                 gr.update(value="", visible=False),                 # sugg_btn_1
                 gr.update(value="", visible=False),                 # sugg_btn_2
+                gr.update(visible=False),                           # export_json_btn
+                gr.update(visible=False),                           # export_excel_btn
                 gr.update(value=""),                                # question
                 gr.update(value="Ask", interactive=True),          # submit_btn
                 None,                                               # conversation_state
@@ -730,6 +756,7 @@ def build_ui() -> gr.Blocks:
             results_table, results_plot, error_box, welcome_group, metadata,
             download_file, download_json, download_excel, explain_panel,
             suggestions_group, sugg_btn_0, sugg_btn_1, sugg_btn_2,
+            export_json_btn, export_excel_btn,
         ]
         QUERY_OUTPUTS = CORE_OUTPUTS + [
             submit_btn, history_state, history_display,
@@ -775,12 +802,12 @@ def build_ui() -> gr.Blocks:
             )
 
         # ── Export buttons ────────────────────────────────────────────────────
-        download_json.click(
+        export_json_btn.click(
             fn=do_export_json,
             inputs=[raw_rows_state],
             outputs=[download_json],
         )
-        download_excel.click(
+        export_excel_btn.click(
             fn=do_export_excel,
             inputs=[raw_rows_state],
             outputs=[download_excel],
@@ -807,11 +834,10 @@ def build_ui() -> gr.Blocks:
             )
 
         # History item click re-populates the question textbox
-        history_display.select(
-            fn=lambda item: gr.update(value=item),
-            inputs=history_display,
-            outputs=question,
-        )
+        def on_history_select(evt: gr.SelectData):
+            return gr.update(value=evt.value)
+
+        history_display.select(fn=on_history_select, outputs=question)
 
     return app
 
@@ -822,5 +848,9 @@ if __name__ == "__main__":
         server_name="0.0.0.0",
         server_port=7860,
         theme=gr.themes.Soft(primary_hue="violet", secondary_hue="slate"),
-        css=MERIDIAN_CSS,
+        css=MERIDIAN_CSS + """
+/* Allow the main content column to grow and scroll so charts are not clipped */
+.gradio-container { min-height: 100vh; }
+.main > .contain { height: auto !important; min-height: 100vh; }
+""",
     )
