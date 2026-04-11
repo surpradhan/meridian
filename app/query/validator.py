@@ -6,7 +6,8 @@ Implements multiple validation rules to prevent errors and optimize performance.
 """
 
 import logging
-from typing import List, Tuple, Dict, Any
+import sqlite3
+from typing import List, Optional, Tuple, Dict, Any
 from app.views.models import QueryRequest
 from app.views.registry import ViewRegistry
 
@@ -231,6 +232,65 @@ class QueryValidator:
         estimated = min(estimated, request.limit)
 
         return max(1, estimated)
+
+    def validate_sql_syntax(
+        self,
+        sql: str,
+        params: Optional[List[Any]] = None,
+    ) -> Tuple[bool, List[str]]:
+        """
+        Validate SQL syntax using SQLite's parser via EXPLAIN.
+
+        Uses an in-memory SQLite connection to parse the SQL without executing it.
+        Missing-table / missing-column errors are expected (views live in the real DB)
+        and are treated as warnings, not failures. Only genuine parse errors are hard
+        failures.
+
+        Note: this validates *syntax only* — parameterized queries (? placeholders)
+        mean SQL injection safety is handled upstream by the query builder.
+
+        DDL statements (CREATE, ALTER, DROP) are not EXPLAIN-able in SQLite and are
+        skipped; the builder only emits SELECT/WITH so this is fine in practice.
+
+        Args:
+            sql: The SQL string to validate (may contain ? placeholders)
+            params: Bound parameters matching the ? placeholders
+
+        Returns:
+            Tuple of (is_valid, error_messages)
+        """
+        stripped = sql.strip().upper()
+        # SQLite's EXPLAIN does not support DDL (CREATE/ALTER/DROP).
+        # Skip those to avoid false negatives; everything else (SELECT, WITH, SELEKT…)
+        # goes through EXPLAIN so genuine parse errors are caught.
+        _DDL_PREFIXES = ("CREATE ", "ALTER ", "DROP ", "INSERT ", "UPDATE ", "DELETE ")
+        if any(stripped.startswith(p) for p in _DDL_PREFIXES):
+            return True, []
+
+        # Count ? placeholders in the SQL to create a correctly-sized dummy params list.
+        # The builder never puts ? inside string literals, so a simple count is reliable.
+        placeholder_count = sql.count("?")
+        dummy_params = [None] * placeholder_count
+
+        conn = sqlite3.connect(":memory:")
+        try:
+            conn.execute(f"EXPLAIN {sql}", dummy_params)
+            return True, []
+        except sqlite3.OperationalError as e:
+            msg = str(e).lower()
+            # Missing table/column/function are expected in a schema-less in-memory DB
+            if any(token in msg for token in ("no such table", "no such column", "no such function")):
+                return True, []
+            return False, [f"SQL syntax error: {e}"]
+        except Exception as e:
+            # Unexpected exceptions (e.g. ProgrammingError) indicate a validator bug.
+            # Log loudly but fail open — don't block legitimate queries due to our bug.
+            logger.warning(
+                f"SQL syntax check raised unexpected error (failing open): {type(e).__name__}: {e}"
+            )
+            return True, []
+        finally:
+            conn.close()
 
     def get_validation_warnings(self, request: QueryRequest) -> List[str]:
         """

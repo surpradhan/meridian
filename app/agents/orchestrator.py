@@ -24,8 +24,11 @@ from app.agents.domain.finance import FinanceAgent
 from app.agents.domain.operations import OperationsAgent
 from app.cache.manager import CacheManager, CacheConfig
 from app.agents.conversation_context import ConversationManager, get_conversation_manager
+from app.observability.tracing import TracingManager
+from app.observability.metrics import get_query_metrics
 
 logger = logging.getLogger(__name__)
+_tracer = TracingManager.get_instance()
 
 CLARIFICATION_THRESHOLD = 0.4
 # Expire stale in-memory conversations every N queries (avoids unbounded growth)
@@ -179,20 +182,22 @@ class Orchestrator:
         """
         logger.info(f"Processing query: {query!r}")
         self._maybe_cleanup()
+        _qm = get_query_metrics()
+        _qm.start_query(query)
 
         ctx, context_summary, conversation_id = self._resolve_context(conversation_id)
         ctx.add_user_message(query)
 
-        # Cache key is context-scoped when a prior context exists so refined
-        # queries don't collide with stateless cache entries for the same text.
+        # Cache check runs outside the main execution span so a hit doesn't inflate
+        # the "query.process" duration with unrelated work.
         cache_key = f"{conversation_id}::{query}" if context_summary else query
-        cached = self.cache.get_result(cache_key)
+        with _tracer.span("query.cache_check"):
+            cached = self.cache.get_result(cache_key)
         if cached is not None:
             logger.info(f"Cache hit for query: {query!r}")
             cached = dict(cached)  # don't mutate the cached copy
             cached["cache_hit"] = True
             cached["conversation_id"] = conversation_id
-            # Keep conversation state consistent even on cache hits
             ctx.add_assistant_message(
                 f"(cached) {cached.get('row_count', 0)} rows from {cached.get('domain', '')}",
                 query_result={
@@ -206,104 +211,131 @@ class Orchestrator:
                 views=cached.get("views", []),
                 result_count=cached.get("row_count", 0),
             )
+            _qm.end_query(query, success=True)
+            _qm.record_rows(cached.get("row_count", 0))
+            _qm.record_domain_query(cached.get("domain", "unknown"))
             return cached
 
-        # Routing (or use forced domain)
-        if forced_domain and forced_domain in self.domain_agents:
-            domain = forced_domain
-            routing_confidence = 1.0
-            logger.debug(f"Using forced domain: {domain}")
-        else:
-            domain, routing_confidence = self.router.route(query)
-            logger.debug(f"Routed to {domain} with confidence {routing_confidence:.2f}")
+        with _tracer.span("query.process", {
+            "query": query[:200],
+            "session_id": conversation_id,
+            "forced_domain": forced_domain or "",
+        }):
+            # Routing (or use forced domain)
+            with _tracer.span("query.route") as route_span:
+                if forced_domain and forced_domain in self.domain_agents:
+                    domain = forced_domain
+                    routing_confidence = 1.0
+                    logger.debug(f"Using forced domain: {domain}")
+                    route_span.set_attribute("method", "forced")
+                else:
+                    domain, routing_confidence = self.router.route(query)
+                    logger.debug(f"Routed to {domain} with confidence {routing_confidence:.2f}")
+                    route_span.set_attribute("method", "auto")
+                route_span.set_attribute("domain", domain)
+                route_span.set_attribute("confidence", str(routing_confidence))
 
-        # Clarification gate
-        if routing_confidence < CLARIFICATION_THRESHOLD:
-            logger.info(
-                f"Low routing confidence ({routing_confidence:.2f}) — requesting clarification"
-            )
-            msg = (
-                f"I'm not sure which business area your question relates to "
-                f"(confidence: {routing_confidence:.0%}). "
-                f"Could you add more context? For example, mention whether you're "
-                f"asking about sales/customers, finance/accounting, or "
-                f"inventory/warehouses/shipments."
-            )
-            ctx.add_assistant_message(msg)
-            return {
-                "needs_clarification": True,
-                "clarification_message": msg,
-                "suggested_domains": list(self.domain_agents.keys()),
-                "domain": domain,
-                "routing_confidence": routing_confidence,
-                "state": QueryState.COMPLETE.value,
-                "confidence": routing_confidence,
-                "cache_hit": False,
-                "conversation_id": conversation_id,
-            }
-
-        agent = self.domain_agents.get(domain)
-        if not agent:
-            return {
-                "error": f"Unknown domain: {domain}",
-                "query": query,
-                "state": QueryState.ERROR.value,
-                "confidence": 0.0,
-                "cache_hit": False,
-                "conversation_id": conversation_id,
-            }
-
-        try:
-            result = self._execute_with_agent(agent, query, domain, context_summary)
-
-            result["domain"] = domain
-            result["routing_confidence"] = routing_confidence
-            result["state"] = QueryState.COMPLETE.value
-            result["cache_hit"] = False
-            result["conversation_id"] = conversation_id
-            result["suggestions"] = self._generate_suggestions(query, domain, result)
-            result["visualization"] = self._build_visualization_hint(result)
-
-            logger.info(
-                f"Query completed — domain={domain}, "
-                f"rows={result.get('row_count', 0)}, "
-                f"confidence={result.get('confidence', 0)}"
-            )
-
-            ctx.add_assistant_message(
-                f"Returned {result.get('row_count', 0)} rows from {domain}",
-                query_result={
+            # Clarification gate
+            if routing_confidence < CLARIFICATION_THRESHOLD:
+                logger.info(
+                    f"Low routing confidence ({routing_confidence:.2f}) — requesting clarification"
+                )
+                msg = (
+                    f"I'm not sure which business area your question relates to "
+                    f"(confidence: {routing_confidence:.0%}). "
+                    f"Could you add more context? For example, mention whether you're "
+                    f"asking about sales/customers, finance/accounting, or "
+                    f"inventory/warehouses/shipments."
+                )
+                ctx.add_assistant_message(msg)
+                return {
+                    "needs_clarification": True,
+                    "clarification_message": msg,
+                    "suggested_domains": list(self.domain_agents.keys()),
                     "domain": domain,
-                    "views": result.get("views", []),
-                    "row_count": result.get("row_count", 0),
-                },
-            )
-            ctx.update_context(
-                domain=domain,
-                views=result.get("views", []),
-                result_count=result.get("row_count", 0),
-            )
+                    "routing_confidence": routing_confidence,
+                    "state": QueryState.COMPLETE.value,
+                    "confidence": routing_confidence,
+                    "cache_hit": False,
+                    "conversation_id": conversation_id,
+                }
 
-            self._save_history(query, result, conversation_id)
+            agent = self.domain_agents.get(domain)
+            if not agent:
+                return {
+                    "error": f"Unknown domain: {domain}",
+                    "query": query,
+                    "state": QueryState.ERROR.value,
+                    "confidence": 0.0,
+                    "cache_hit": False,
+                    "conversation_id": conversation_id,
+                }
 
-            # Only cache stateless (context-free) results to avoid cross-session hits
-            if "error" not in result and not context_summary:
-                self.cache.set_result(cache_key, result)
+            try:
+                import time as _time
+                t0 = _time.monotonic()
+                with _tracer.span("query.agent_execute", {"domain": domain}) as exec_span:
+                    result = self._execute_with_agent(agent, query, domain, context_summary)
+                    elapsed_ms = (_time.monotonic() - t0) * 1000
+                    # set_attribute must be called while the span is still open (inside with)
+                    exec_span.set_attribute("row_count", str(result.get("row_count", 0)))
+                    exec_span.set_attribute("duration_ms", str(round(elapsed_ms)))
 
-            return result
+                result["domain"] = domain
+                result["routing_confidence"] = routing_confidence
+                result["state"] = QueryState.COMPLETE.value
+                result["cache_hit"] = False
+                result["conversation_id"] = conversation_id
+                with _tracer.span("query.suggestions"):
+                    result["suggestions"] = self._generate_suggestions(query, domain, result)
+                result["visualization"] = self._build_visualization_hint(result)
 
-        except Exception as e:
-            logger.error(f"Query processing failed: {e}")
-            return {
-                "error": str(e),
-                "query": query,
-                "domain": domain,
-                "routing_confidence": routing_confidence,
-                "state": QueryState.ERROR.value,
-                "confidence": 0.0,
-                "cache_hit": False,
-                "conversation_id": conversation_id,
-            }
+                logger.info(
+                    f"Query completed — domain={domain}, "
+                    f"rows={result.get('row_count', 0)}, "
+                    f"confidence={result.get('confidence', 0)}"
+                )
+                _qm.end_query(query, success=True)
+                _qm.record_rows(result.get("row_count", 0))
+                _qm.record_domain_query(domain)
+
+                ctx.add_assistant_message(
+                    f"Returned {result.get('row_count', 0)} rows from {domain}",
+                    query_result={
+                        "domain": domain,
+                        "views": result.get("views", []),
+                        "row_count": result.get("row_count", 0),
+                    },
+                )
+                ctx.update_context(
+                    domain=domain,
+                    views=result.get("views", []),
+                    result_count=result.get("row_count", 0),
+                )
+
+                self._save_history(query, result, conversation_id)
+
+                # Only cache stateless (context-free) results to avoid cross-session hits
+                with _tracer.span("query.cache_store"):
+                    if "error" not in result and not context_summary:
+                        self.cache.set_result(cache_key, result)
+
+                return result
+
+            except Exception as e:
+                logger.error(f"Query processing failed: {e}")
+                _qm.end_query(query, success=False)
+                _qm.record_domain_query(domain)
+                return {
+                    "error": str(e),
+                    "query": query,
+                    "domain": domain,
+                    "routing_confidence": routing_confidence,
+                    "state": QueryState.ERROR.value,
+                    "confidence": 0.0,
+                    "cache_hit": False,
+                    "conversation_id": conversation_id,
+                }
 
     def _execute_with_agent(
         self,

@@ -8,7 +8,7 @@ Supports .env files and environment variables.
 import os
 import secrets
 import warnings
-from typing import List, Literal
+from typing import List, Literal, Optional
 from pydantic_settings import BaseSettings
 from pydantic import Field, model_validator
 
@@ -80,6 +80,14 @@ class Settings(BaseSettings):
     )
     enforce_https: bool = Field(default=False, description="Redirect HTTP to HTTPS in production")
     audit_log_enabled: bool = Field(default=True, description="Enable audit logging")
+
+    # OAuth / SSO (Phase 8)
+    google_client_id: Optional[str] = Field(default=None, description="Google OAuth2 client ID")
+    google_client_secret: Optional[str] = Field(default=None, description="Google OAuth2 client secret")
+    oidc_issuer: Optional[str] = Field(default=None, description="Generic OIDC issuer URL (e.g. https://accounts.google.com or Okta URL)")
+    oidc_client_id: Optional[str] = Field(default=None, description="Generic OIDC client ID")
+    oidc_client_secret: Optional[str] = Field(default=None, description="Generic OIDC client secret")
+    oauth_redirect_base_url: str = Field(default="http://localhost:8000", description="Base URL for OAuth callback redirect")
 
     class Config:
         env_file = [".env", ".env.local"]

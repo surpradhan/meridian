@@ -331,6 +331,12 @@ class BaseDomainAgent(ABC):
         sql, params = self.builder.build_query_parameterized(request)
         logger.info(f"Executing query: {sql}  params={params}")
 
+        # Validate SQL syntax before sending to the database
+        from app.query.validator import get_validator
+        syntax_valid, syntax_errors = get_validator().validate_sql_syntax(sql, params)
+        if not syntax_valid:
+            raise ValueError(f"Generated SQL failed syntax check: {'; '.join(syntax_errors)}")
+
         # Execute query with bound parameters, measuring elapsed time
         t0 = time.monotonic()
         results = self.db.execute_query(sql, params if params else None)

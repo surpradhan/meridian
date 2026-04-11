@@ -5,6 +5,8 @@ Chat-based interface for querying business data using natural language.
 Results are always displayed in clean tabular format.
 """
 
+import atexit
+import glob
 import json
 import logging
 import os
@@ -12,6 +14,8 @@ import tempfile
 from typing import Any, Dict, List, Optional
 import pandas as pd
 import gradio as gr
+import plotly.express as px
+import plotly.graph_objects as go
 
 from app.config import settings
 from app.views.registry import get_registry
@@ -21,6 +25,23 @@ from app.agents.orchestrator import Orchestrator
 logging.basicConfig(level=logging.WARNING)
 logging.getLogger("app").setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
+
+_TEMP_PREFIX = "meridian_results_"
+
+
+def _cleanup_temp_files() -> None:
+    """Remove leftover MERIDIAN temp files (CSV / JSON / Excel) from the system temp dir."""
+    pattern = os.path.join(tempfile.gettempdir(), f"{_TEMP_PREFIX}*")
+    for path in glob.glob(pattern):
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
+# Remove any temp files left over from previous runs, and register cleanup on exit.
+_cleanup_temp_files()
+atexit.register(_cleanup_temp_files)
 
 # Initialize orchestrator once at startup
 registry = get_registry()
@@ -42,6 +63,29 @@ def format_result_as_table(result: list) -> pd.DataFrame:
     if not result:
         return pd.DataFrame({"Info": ["No results found."]})
     return pd.DataFrame(result)
+
+
+def build_plotly_figure(rows: list, viz: dict) -> Optional[go.Figure]:
+    """Convert chart hint + result rows into a Plotly figure, or None for table/missing data."""
+    if not rows or not viz or viz.get("chart_type") == "table":
+        return None
+    df = pd.DataFrame(rows)
+    chart_type = viz.get("chart_type")
+    x = viz.get("x_axis")
+    y = viz.get("y_axis")
+    title = viz.get("reason", "")
+    if not x or not y or x not in df.columns or y not in df.columns:
+        return None
+    try:
+        if chart_type == "line":
+            return px.line(df, x=x, y=y, title=title)
+        elif chart_type == "bar":
+            return px.bar(df, x=x, y=y, title=title)
+        elif chart_type == "pie":
+            return px.pie(df, names=x, values=y, title=title)
+    except Exception as exc:
+        logger.debug(f"Plotly figure build failed (chart_type={chart_type!r}, x={x!r}, y={y!r}): {exc}")
+    return None
 
 
 def build_metadata_html(result: dict, show_sql: bool) -> str:
@@ -93,13 +137,14 @@ def process_query(
 
     Returns:
         Tuple of (DataFrame, error_html, metadata_html, csv_file_path,
-                  suggestions_list, conversation_id, explain_data)
+                  suggestions_list, conversation_id, explain_data, visualization)
     """
     empty_df = pd.DataFrame()
     no_explain: Dict[str, Any] = {}
+    no_viz: Dict[str, Any] = {}
 
     if not question.strip():
-        return empty_df, "", "", None, [], conversation_id, no_explain
+        return empty_df, "", "", None, [], conversation_id, no_explain, no_viz
 
     try:
         forced = None if domain_choice == "Auto-detect" else domain_choice.lower()
@@ -113,17 +158,18 @@ def process_query(
 
         if "error" in result and result["error"]:
             error_html = f'<div class="error-alert">⚠️ {result["error"]}</div>'
-            return empty_df, error_html, "", None, [], new_conv_id, no_explain
+            return empty_df, error_html, "", None, [], new_conv_id, no_explain, no_viz
 
         raw_results = result.get("result", [])
         df = format_result_as_table(raw_results)
         metadata_html = build_metadata_html(result, show_sql)
         suggestions: List[str] = result.get("suggestions") or []
+        visualization: Dict[str, Any] = result.get("visualization") or {}
 
         csv_path = None
         if raw_results:
             tmp = tempfile.NamedTemporaryFile(
-                delete=False, suffix=".csv", prefix="meridian_results_"
+                delete=False, suffix=".csv", prefix=_TEMP_PREFIX
             )
             df.to_csv(tmp.name, index=False)
             csv_path = tmp.name
@@ -138,7 +184,7 @@ def process_query(
             except Exception as ex:
                 logger.warning(f"Explain generation failed: {ex}")
 
-        return df, "", metadata_html, csv_path, suggestions, new_conv_id, explain_data
+        return df, "", metadata_html, csv_path, suggestions, new_conv_id, explain_data, visualization
 
     except Exception as e:
         logger.error(f"UI query failed: {e}", exc_info=True)
@@ -148,7 +194,7 @@ def process_query(
             f'Try rephrasing your question.'
             f'</div>'
         )
-        return empty_df, error_html, "", None, [], conversation_id, no_explain
+        return empty_df, error_html, "", None, [], conversation_id, no_explain, no_viz
 
 
 def export_results_as_json(raw_rows: Optional[List[Dict[str, Any]]]) -> Optional[str]:
@@ -157,7 +203,7 @@ def export_results_as_json(raw_rows: Optional[List[Dict[str, Any]]]) -> Optional
         return None
     try:
         from app.export.exporters import to_json
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".json", prefix="meridian_results_")
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".json", prefix=_TEMP_PREFIX)
         tmp.write(to_json(raw_rows))
         tmp.flush()
         return tmp.name
@@ -172,7 +218,7 @@ def export_results_as_excel(raw_rows: Optional[List[Dict[str, Any]]]) -> Optiona
         return None
     try:
         from app.export.exporters import to_excel
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx", prefix="meridian_results_")
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx", prefix=_TEMP_PREFIX)
         tmp.write(to_excel(raw_rows))
         tmp.flush()
         return tmp.name
@@ -506,6 +552,11 @@ def build_ui() -> gr.Blocks:
                     visible=False,
                 )
 
+                results_plot = gr.Plot(
+                    label="Visualization",
+                    visible=False,
+                )
+
                 with gr.Row():
                     download_file = gr.File(
                         label="Download CSV",
@@ -591,7 +642,7 @@ def build_ui() -> gr.Blocks:
 
         def run_query(question_val, domain_val, show_sql_val, show_explain_val, history_val, conv_id):
             """Run a query; update all outputs, history panel, and button state."""
-            df, error_html, meta_html, csv_path, sugg_list, new_conv_id, explain_data = process_query(
+            df, error_html, meta_html, csv_path, sugg_list, new_conv_id, explain_data, viz = process_query(
                 question_val, domain_val, show_sql_val,
                 show_explain=show_explain_val, conversation_id=conv_id,
             )
@@ -616,8 +667,12 @@ def build_ui() -> gr.Blocks:
                 except Exception:
                     pass
 
+            # Build Plotly figure from visualization hint
+            fig = build_plotly_figure(raw_rows, viz)
+
             return (
                 gr.update(value=df, visible=True),                     # results_table
+                gr.update(value=fig, visible=fig is not None),          # results_plot
                 error_html,                                              # error_box
                 gr.update(visible=False),                                # welcome_group
                 meta_html,                                               # metadata
@@ -642,6 +697,7 @@ def build_ui() -> gr.Blocks:
             """Reset main panel; preserve history, start fresh conversation."""
             return (
                 gr.update(value=pd.DataFrame(), visible=False),    # results_table
+                gr.update(value=None, visible=False),              # results_plot
                 "",                                                 # error_box
                 gr.update(visible=True),                            # welcome_group
                 "",                                                 # metadata
@@ -671,7 +727,7 @@ def build_ui() -> gr.Blocks:
         # ── Output lists ─────────────────────────────────────────────────────
 
         CORE_OUTPUTS = [
-            results_table, error_box, welcome_group, metadata,
+            results_table, results_plot, error_box, welcome_group, metadata,
             download_file, download_json, download_excel, explain_panel,
             suggestions_group, sugg_btn_0, sugg_btn_1, sugg_btn_2,
         ]
