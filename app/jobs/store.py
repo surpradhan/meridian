@@ -10,7 +10,7 @@ import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor, Future
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 
@@ -75,7 +75,7 @@ class JobStore:
         record = JobRecord(
             job_id=job_id,
             status=JobStatus.PENDING,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
         )
 
         with self._lock:
@@ -94,7 +94,7 @@ class JobStore:
             record = self._jobs.get(job_id)
             if record:
                 record.status = JobStatus.RUNNING
-                record.started_at = datetime.utcnow()
+                record.started_at = datetime.now(timezone.utc)
 
         try:
             result = fn(*args, **kwargs)
@@ -103,7 +103,7 @@ class JobStore:
                 if record:
                     record.status = JobStatus.COMPLETE
                     record.result = result
-                    record.completed_at = datetime.utcnow()
+                    record.completed_at = datetime.now(timezone.utc)
             logger.info(f"Job {job_id} completed successfully")
         except Exception as e:
             logger.error(f"Job {job_id} failed: {e}", exc_info=True)
@@ -112,7 +112,7 @@ class JobStore:
                 if record:
                     record.status = JobStatus.FAILED
                     record.error = str(e)
-                    record.completed_at = datetime.utcnow()
+                    record.completed_at = datetime.now(timezone.utc)
 
     def get(self, job_id: str) -> Optional[JobRecord]:
         """Return the JobRecord for a given job_id, or None."""
@@ -130,7 +130,7 @@ class JobStore:
                 if cancelled:
                     record.status = JobStatus.FAILED
                     record.error = "Cancelled by user"
-                    record.completed_at = datetime.utcnow()
+                    record.completed_at = datetime.now(timezone.utc)
                 return cancelled
             # Already running or done — remove from store
             if record.status in (JobStatus.COMPLETE, JobStatus.FAILED):
@@ -145,7 +145,7 @@ class JobStore:
 
     def cleanup_old_jobs(self, max_age_seconds: int = _DEFAULT_MAX_AGE_SECONDS) -> int:
         """Remove completed/failed jobs older than max_age_seconds. Returns count removed."""
-        cutoff = datetime.utcnow() - timedelta(seconds=max_age_seconds)
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=max_age_seconds)
         to_remove: List[str] = []
 
         with self._lock:

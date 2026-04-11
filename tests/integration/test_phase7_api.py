@@ -141,7 +141,7 @@ class TestAdminDomainAPI:
         mini_app.dependency_overrides[get_current_user] = lambda: user
 
         with patch("app.api.routes.admin.get_domain_registry", return_value=domain_registry), \
-             patch("app.api.routes.admin._reload_orchestrator"):
+             patch("app.api.routes.admin._reload_orchestrator", return_value=None):
             yield TestClient(mini_app)
 
     def test_register_domain(self, client):

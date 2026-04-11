@@ -10,7 +10,7 @@ import logging
 import re
 from typing import Any, Dict, List, Optional
 
-from app.agents.domain.base_domain import BaseDomainAgent, _build_interpret_prompt
+from app.agents.domain.base_domain import BaseDomainAgent
 from app.database.connection import DbConnection
 from app.onboarding.models import DomainConfig
 from app.query.builder import QueryBuilder

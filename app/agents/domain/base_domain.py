@@ -8,6 +8,7 @@ Provides common functionality like view discovery, query building, and execution
 import json
 import logging
 import re
+import time
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
 from app.views.models import QueryRequest
@@ -321,8 +322,6 @@ class BaseDomainAgent(ABC):
             ValueError: If query is invalid
             Exception: If database execution fails
         """
-        import time
-
         # Validate views
         is_valid, msg = self.registry.validate_view_combination(request.selected_views)
         if not is_valid:

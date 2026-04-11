@@ -10,7 +10,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from app.auth.dependencies import get_current_user
+from app.auth.dependencies import get_current_user, require_role
 from app.auth.store import User
 from app.jobs.store import JobStatus, get_job_store
 
@@ -56,15 +56,9 @@ async def submit_async_query(
     if not current_user.can_execute_queries():
         raise HTTPException(status_code=403, detail="Your role does not permit query execution.")
 
-    from app.views.registry import get_registry
-    from app.database.connection import get_db
-    from app.agents.orchestrator import Orchestrator
-    from app.config import settings
+    from app.agents.orchestrator import get_shared_or_new_orchestrator
 
-    registry = get_registry()
-    db = get_db(connection_string=settings.database_url)
-    orchestrator = Orchestrator(registry, db)
-
+    orchestrator = get_shared_or_new_orchestrator()
     store = get_job_store()
     job_id = store.submit(
         orchestrator.process_query,
@@ -74,7 +68,11 @@ async def submit_async_query(
     )
 
     logger.info(f"Async job {job_id} submitted by {current_user.username}")
-    return {"job_id": job_id, "status": JobStatus.PENDING.value, "message": f"Job submitted. Poll GET /api/jobs/{job_id} for results."}
+    return JobSubmitResponse(
+        job_id=job_id,
+        status=JobStatus.PENDING.value,
+        message=f"Job submitted. Poll GET /api/jobs/{job_id} for results.",
+    )
 
 
 @router.get("/api/jobs/{job_id}")
@@ -108,9 +106,9 @@ async def cancel_job(
 
 @router.get("/api/jobs")
 async def list_jobs(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role("admin")),
 ) -> Dict[str, Any]:
-    """List all jobs in the store (admin/debug view)."""
+    """List all jobs in the store. Restricted to admin role."""
     store = get_job_store()
     jobs = store.list_jobs()
     return {"jobs": jobs, "count": len(jobs)}

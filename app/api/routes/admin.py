@@ -8,7 +8,7 @@ All require admin role.
 """
 
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -48,10 +48,17 @@ async def register_domain(
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
 
-    # Hot-reload the orchestrator's domain agents
-    _reload_orchestrator()
-
+    reload_warning = _reload_orchestrator()
     logger.info(f"Admin {current_user.username} registered domain {config.name!r}")
+    if reload_warning:
+        from fastapi.responses import Response
+        import json
+        headers = {"X-Reload-Warning": reload_warning}
+        return Response(
+            content=json.dumps(result.model_dump()),
+            media_type="application/json",
+            headers=headers,
+        )
     return result
 
 
@@ -75,9 +82,12 @@ async def delete_domain(
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Domain {name!r} not found")
 
-    _reload_orchestrator()
+    reload_warning = _reload_orchestrator()
     logger.info(f"Admin {current_user.username} deleted domain {name!r}")
-    return {"name": name, "message": "Domain deleted"}
+    resp: Dict[str, Any] = {"name": name, "message": "Domain deleted"}
+    if reload_warning:
+        resp["reload_warning"] = reload_warning
+    return resp
 
 
 # ------------------------------------------------------------------
@@ -103,19 +113,21 @@ async def get_performance_report(
 # ------------------------------------------------------------------
 
 
-def _reload_orchestrator() -> None:
+def _reload_orchestrator() -> Optional[str]:
     """
     Ask the singleton Orchestrator (if one has been created) to reload
     dynamic domain agents from the registry.
 
-    Swallows all errors — the API call has already succeeded; a failed
-    reload just means the new domain won't be available until the next
-    fresh Orchestrator instantiation.
+    Returns a warning string if reload failed (so the caller can surface it
+    to the admin), or None on success.
     """
     try:
         from app.agents.orchestrator import _get_shared_orchestrator
         orch = _get_shared_orchestrator()
         if orch is not None:
             orch.reload_domain_agents()
+        return None
     except Exception as e:
-        logger.warning(f"Orchestrator hot-reload after domain change failed: {e}")
+        msg = f"Domain saved, but orchestrator hot-reload failed: {e}. The new domain will be active after next restart."
+        logger.warning(msg)
+        return msg

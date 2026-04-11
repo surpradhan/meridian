@@ -608,3 +608,24 @@ def set_shared_orchestrator(orch: "Orchestrator") -> None:
     global _shared_orchestrator
     with _shared_lock:
         _shared_orchestrator = orch
+
+
+def get_shared_or_new_orchestrator() -> "Orchestrator":
+    """
+    Return the shared Orchestrator, creating and registering one if needed.
+
+    All routes should use this instead of constructing Orchestrator directly —
+    ensures dynamic domains are visible and avoids redundant startup cost.
+    """
+    global _shared_orchestrator
+    if _shared_orchestrator is not None:
+        return _shared_orchestrator
+    with _shared_lock:
+        if _shared_orchestrator is None:
+            from app.views.registry import get_registry
+            from app.database.connection import get_db
+            from app.config import settings
+            registry = get_registry()
+            db = get_db(connection_string=settings.database_url)
+            _shared_orchestrator = Orchestrator(registry, db)
+    return _shared_orchestrator

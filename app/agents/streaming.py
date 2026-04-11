@@ -70,7 +70,7 @@ class MeridianStreamingCallback:
 
     async def aiter_tokens(self) -> AsyncGenerator[str, None]:
         """Async generator — yields tokens without blocking the event loop."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         while True:
             # Poll the sync queue in the thread pool to avoid blocking
             token = await loop.run_in_executor(None, self._queue.get)

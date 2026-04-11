@@ -69,15 +69,9 @@ async def export_query(
 
     # Run the query
     try:
-        from app.views.registry import get_registry
-        from app.database.connection import get_db
-        from app.agents.orchestrator import Orchestrator
-        from app.config import settings
+        from app.agents.orchestrator import get_shared_or_new_orchestrator
 
-        registry = get_registry()
-        db = get_db(connection_string=settings.database_url)
-        orchestrator = Orchestrator(registry, db)
-
+        orchestrator = get_shared_or_new_orchestrator()
         result = orchestrator.process_query(
             request.question,
             conversation_id=request.conversation_id,

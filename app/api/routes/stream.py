@@ -48,36 +48,26 @@ async def _stream_query(
 ) -> AsyncGenerator[str, None]:
     """
     Async generator that:
-    1. Yields token events as LLM produces them
+    1. Yields token events as LLM produces them (via thread-local callback injection)
     2. Yields a final result event with the full orchestrator response
     """
-    from app.views.registry import get_registry
-    from app.database.connection import get_db
-    from app.agents.orchestrator import Orchestrator
-    from app.agents.llm_client import get_llm
-    from app.config import settings
+    from app.agents.orchestrator import get_shared_or_new_orchestrator
+    from app.agents.llm_client import get_llm, set_streaming_llm, clear_streaming_llm
 
-    registry = get_registry()
-    db = get_db(connection_string=settings.database_url)
-    orchestrator = Orchestrator(registry, db)
-
-    # Inject the streaming callback into the LLM for this request only.
-    # The orchestrator runs synchronously in a thread so the event loop stays free.
+    orchestrator = get_shared_or_new_orchestrator()
     result_holder: Dict[str, Any] = {}
     error_holder: Dict[str, str] = {}
 
     def _run_query() -> None:
+        # Inject a callback-equipped LLM for this thread only so all agent and
+        # router calls in this request stream tokens without affecting others.
+        llm = get_llm()
+        if llm is not None:
+            try:
+                set_streaming_llm(llm.with_config({"callbacks": [callback]}))
+            except Exception:
+                pass  # fall back to non-streaming if with_config fails
         try:
-            # Temporarily patch LLM with streaming callback
-            llm = get_llm()
-            if llm is not None:
-                try:
-                    streaming_llm = llm.with_config({"callbacks": [callback]})
-                    # Patch the orchestrator's router and agents to use the streaming LLM
-                    orchestrator.router._llm_override = streaming_llm
-                except Exception:
-                    pass  # If patching fails, fall back to non-streaming
-
             result = orchestrator.process_query(
                 question,
                 conversation_id=conversation_id,
@@ -87,10 +77,11 @@ async def _stream_query(
         except Exception as e:
             error_holder["error"] = str(e)
         finally:
+            clear_streaming_llm()
             callback.mark_done()
 
-    # Run orchestrator in thread pool to keep async loop unblocked
-    loop = asyncio.get_event_loop()
+    # Run orchestrator in thread pool to keep the event loop unblocked
+    loop = asyncio.get_running_loop()
     thread = threading.Thread(target=_run_query, daemon=True)
     thread.start()
 

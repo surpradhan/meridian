@@ -15,7 +15,7 @@ import json
 import sqlite3
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List
 from unittest.mock import MagicMock, patch
 
@@ -96,8 +96,8 @@ class TestJobStore:
         old_record = JobRecord(
             job_id="old-job",
             status=JobStatus.COMPLETE,
-            created_at=datetime(2020, 1, 1),
-            completed_at=datetime(2020, 1, 1),
+            created_at=datetime(2020, 1, 1, tzinfo=timezone.utc),
+            completed_at=datetime(2020, 1, 1, tzinfo=timezone.utc),
             result={"x": 1},
         )
         with store._lock:
