@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(default="", description="OpenAI API key")
     openai_model: str = Field(default="gpt-4", description="OpenAI model to use")
 
+    # Groq (takes priority over OpenAI when set)
+    groq_api_key: str = Field(default="", description="Groq API key")
+    groq_model: str = Field(default="llama-3.3-70b-versatile", description="Groq model to use")
+
     # Langsmith (Optional)
     langsmith_api_key: str = Field(default="", description="Langsmith API key")
     langsmith_project: str = Field(default="meridian", description="Langsmith project name")

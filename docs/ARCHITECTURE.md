@@ -60,21 +60,39 @@ MERIDIAN is a multi-agent data navigation platform that uses natural language pr
 **Responsibility**: HTTP interface for external clients
 
 **Query endpoints** (`query.py`):
-- `POST /api/query/execute` - Process natural language query (accepts `conversation_id`, returns `suggestions`)
-- `POST /api/query/validate` - Validate without executing
-- `GET /api/query/domains` - List available domains
-- `GET /api/query/explore` - Explore domain capabilities
+- `POST /api/query/execute` — Process query; supports `explain=true` for routing + SQL breakdown
+- `POST /api/query/validate` — Validate without executing
+- `GET /api/query/domains` — List available domains
+- `GET /api/query/explore` — Explore domain capabilities
+
+**Async job endpoints** (`jobs.py`):
+- `POST /api/query/execute-async` — Submit long-running query as background job
+- `GET /api/jobs/{job_id}` — Poll status; returns result when `status=complete`
+- `DELETE /api/jobs/{job_id}` — Cancel / forget a job
+- `GET /api/jobs` — List all jobs for current session
+
+**Streaming endpoint** (`stream.py`):
+- `POST /api/query/stream` — Server-Sent Events; emits `token`, `result`, `done` events
+
+**Export endpoint** (`export.py`):
+- `POST /api/query/export` — Run query; download result as JSON, CSV, or Excel attachment
 
 **History endpoints** (`history.py`):
-- `GET /api/history?limit=N` - List recent queries, newest first
-- `GET /api/history/{id}` - Retrieve a single history entry
-- `DELETE /api/history/{id}` - Delete a history entry
+- `GET /api/history?limit=N` — List recent queries, newest first
+- `GET /api/history/{id}` — Retrieve a single history entry
+- `DELETE /api/history/{id}` — Delete a history entry
+
+**Admin endpoints** (`admin.py`, require `role=admin`):
+- `POST /api/admin/domains` — Register a dynamic domain
+- `GET /api/admin/domains` — List dynamic domains
+- `DELETE /api/admin/domains/{name}` — Remove dynamic domain
+- `GET /api/admin/performance` — Index advisor report (recommendations + slow queries + patterns)
 
 **Key Features**:
 - Request/response validation with Pydantic
 - Automatic domain routing with optional `forced_domain`
 - `conversation_id` threaded through request/response for multi-turn sessions
-- Optional execution tracing
+- Optional execution tracing and explain mode
 - Error handling and logging
 
 ### 2. Orchestrator (`app/agents/orchestrator.py`)
@@ -179,14 +197,19 @@ Return Results with Confidence + interpretation_method ("llm" | "regex")
 
 ### 5. LLM Client (`app/agents/llm_client.py`)
 
-**Responsibility**: Provide a single shared `ChatOpenAI` instance for the process
+**Responsibility**: Provide a single shared LLM instance for the process
+
+**Provider priority** (Groq → OpenAI):
+1. If `GROQ_API_KEY` is set → initialize `ChatGroq` (`langchain-groq`), default model `llama-3.3-70b-versatile`
+2. Else if `OPENAI_API_KEY` is set → initialize `ChatOpenAI` (`langchain-openai`), default model `gpt-4`
+3. Else → return `None` (LLM features disabled, regex fallback used everywhere)
 
 **Design**:
 - Module-level singleton (`_client`, `_init_attempted`) — initialized once on first call
-- Returns `None` gracefully when `OPENAI_API_KEY` is not set or `langchain-openai` is not installed
+- Returns `None` gracefully when no key is configured
 - `reset_llm_client()` resets state for test injection
 
-**Usage**: Both `RouterAgent` and `BaseDomainAgent` call `get_llm()` — they never instantiate `ChatOpenAI` directly, ensuring at most one connection per process.
+**Usage**: Both `RouterAgent` and `BaseDomainAgent` call `get_llm()` — never instantiate providers directly.
 
 ### 6. Query Validator (`app/query/validator.py`)
 
@@ -247,6 +270,54 @@ Return Results with Confidence + interpretation_method ("llm" | "regex")
 - **table**: fallback for any other shape
 
 **Integration**: `Orchestrator._build_visualization_hint()` is called after every query; result dict gains a `visualization` key: `{chart_type, x_axis, y_axis, reason}`.
+
+### 8a. Async Job Store (`app/jobs/store.py`)
+
+**Responsibility**: Background job queue for long-running queries
+
+**Design**:
+- `JobStore` wraps `concurrent.futures.ThreadPoolExecutor`; thread-safe `dict[str, JobRecord]` protected by `threading.Lock`
+- `submit(fn)` → `job_id` (UUID); runs `fn` in pool; captures result or exception into `JobRecord`
+- `cleanup_old_jobs(max_age_seconds)` — prunes completed jobs older than threshold
+- Module-level singleton via `get_job_store()`
+
+**States**: `PENDING → RUNNING → COMPLETE | FAILED`
+
+### 8b. Streaming Callback (`app/agents/streaming.py`)
+
+**Responsibility**: Bridge LangChain token events to an async generator
+
+**Design**:
+- `MeridianStreamingCallback` extends `BaseCallbackHandler`
+- `on_llm_new_token(token)` puts tokens onto a `queue.Queue`; `on_llm_end` / `on_llm_error` signals done via sentinel
+- `iter_tokens()` — sync generator for thread consumers
+- `aiter_tokens()` — async generator using `asyncio.get_event_loop().run_in_executor` for SSE route
+
+### 8c. Domain Registry (`app/onboarding/registry.py`)
+
+**Responsibility**: Persist and serve dynamically registered domains
+
+**Design**:
+- SQLite-backed `dynamic_domains` table (JSON-serialized `DomainConfig`)
+- `register(config)` validates slug, rejects conflicts with built-in domains (`sales`, `finance`, `operations`), upserts
+- After registration, `_reload_orchestrator()` rebuilds dynamic agents in the running `Orchestrator`
+- `DynamicDomainAgent` (in `agent_factory.py`) extends `BaseDomainAgent` from config at runtime
+
+### 8d. Export (`app/export/exporters.py`)
+
+**Responsibility**: Serialize query result rows to downloadable formats
+
+- `to_json(rows)` → UTF-8 bytes via `json.dumps(default=str)`
+- `to_csv(rows)` → UTF-8-BOM bytes via `csv.DictWriter`
+- `to_excel(rows)` → `.xlsx` bytes via `pandas.DataFrame.to_excel` + `openpyxl`
+
+### 8e. Explain Builder (`app/explain/builder.py`)
+
+**Responsibility**: Build structured explanation from orchestrator result
+
+**`ExplainResponse` fields**: `query`, `routing_decision`, `views_selected`, `filters_extracted`, `aggregations`, `group_by`, `sql_generated`, `join_paths`, `time_resolution`, `interpretation_method`, `confidence`
+
+**Integration**: `POST /api/query/execute` with `explain=true` appends `"explain": ExplainResponse.model_dump()` to the response.
 
 ### 8. View Registry (`app/views/registry.py`)
 
@@ -395,21 +466,25 @@ tests/
 │   ├── test_views.py            # View registry (35 tests)
 │   ├── test_llm_phase3.py       # LLM routing + interpretation (20 tests)
 │   ├── test_phase4.py           # Conversational Intelligence (50 tests)
-│   └── test_phase6.py           # Advanced Query Capabilities (65 tests)
+│   ├── test_phase6.py           # Advanced Query Capabilities (65 tests)
+│   └── test_phase7.py           # Scale & Polish unit tests (35 tests)
 ├── integration/                 # Multi-component tests
 │   ├── test_agents.py
 │   ├── test_advanced_features.py
-│   ├── test_history_api.py      # History REST API (12 tests — pre-existing failures)
+│   ├── test_history_api.py
 │   ├── test_orchestrator.py
 │   ├── test_phase3_phase4.py
+│   ├── test_phase7_api.py       # Phase 7 API integration (16 tests)
 │   ├── test_ui_queries.py
 │   └── test_views.py
+├── performance/                 # Load tests (require TEST_SERVER_URL)
+│   └── test_load.py             # P50/P95/P99 latency, concurrency (5 tests)
 └── fixtures/                    # Test data
     ├── data.py
     └── mocks.py
 ```
 
-**Total: 441+ tests (429 passing; 12 pre-existing `test_history_api.py` failures unrelated to query logic)**
+**Total: 522+ tests, all passing**
 
 ## Deployment Architecture
 
@@ -442,14 +517,12 @@ tests/
 
 ## Future Enhancements
 
-1. **Rate Limiting**: Per-user query limits (middleware stub exists) — Phase 7
-2. **Audit Logging**: Track all queries for compliance — Phase 7
-3. **Multi-tenancy**: Support multiple organizations with row-level security — Phase 7
-4. **Custom Domains**: User-defined domain agents without code changes — Phase 7
-5. **Plotly Visualization**: Wire `visualization` hint from orchestrator result into Gradio chart rendering — Phase 7
-6. **Streaming Responses**: Real-time token output for long LLM calls — Phase 7
-7. **Async Query Execution**: Background jobs for long-running queries — Phase 7
+1. **Plotly Visualization**: Wire `visualization` hint from orchestrator result into Gradio chart rendering
+2. **Kubernetes / Helm**: Manifests for cloud deployment at scale
+3. **Multi-tenancy**: Row-level security for multiple organizations
+4. **Audit Log API**: Expose the audit trail via a REST endpoint
+5. **Webhook notifications**: Push job-complete events to caller-supplied URLs
 
 ---
 
-**Last Updated**: 2026-04-09
+**Last Updated**: 2026-04-11

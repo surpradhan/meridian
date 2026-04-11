@@ -11,6 +11,7 @@ pydantic-settings==2.1.0
 langchain==0.2.0
 langchain-openai==0.1.7
 langchain-community==0.2.0
+langchain-groq>=0.1.0
 langgraph==0.1.1
 langsmith==0.1.63
 
@@ -35,3 +36,6 @@ python-json-logger==2.0.7
 # Authentication & Security
 python-jose[cryptography]==3.3.0
 bcrypt>=4.0.0
+
+# Export (Phase 7)
+openpyxl>=3.1.0

@@ -12,9 +12,25 @@ errors), avoiding pointless retries that just add latency.
 """
 
 import logging
+import threading
 from typing import Optional, Tuple, Type
 
 logger = logging.getLogger(__name__)
+
+# Thread-local LLM override — lets the streaming route inject a callback-equipped
+# LLM for a single thread without affecting other concurrent requests.
+_thread_local = threading.local()
+
+
+def set_streaming_llm(client: object) -> None:
+    """Override get_llm() for the current thread with a streaming-enabled client."""
+    _thread_local.client = client
+
+
+def clear_streaming_llm() -> None:
+    """Remove the per-thread LLM override."""
+    if hasattr(_thread_local, "client"):
+        del _thread_local.client
 
 # ---------------------------------------------------------------------------
 # Tenacity retry helpers
@@ -82,11 +98,16 @@ _init_attempted: bool = False
 
 def get_llm() -> Optional[object]:
     """
-    Return the shared ChatOpenAI client, initializing it on first call.
+    Return the shared LLM client, initializing it on first call.
 
-    Returns None (and logs a warning) if the OpenAI API key is not set
-    or if the langchain_openai package is unavailable.
+    Provider priority: Groq (if GROQ_API_KEY is set) → OpenAI (if OPENAI_API_KEY is set).
+    Returns None if neither key is configured.
     """
+    # Per-thread override (used by streaming route to inject callbacks)
+    thread_override = getattr(_thread_local, "client", None)
+    if thread_override is not None:
+        return thread_override
+
     global _client, _init_attempted
     if _init_attempted:
         return _client
@@ -94,16 +115,27 @@ def get_llm() -> Optional[object]:
     _init_attempted = True
     try:
         from app.config import settings
-        if not settings.openai_api_key:
-            logger.debug("No OpenAI API key configured; LLM features disabled")
-            return None
-        from langchain_openai import ChatOpenAI
-        _client = ChatOpenAI(
-            model=settings.openai_model,
-            api_key=settings.openai_api_key,
-            temperature=0,
-        )
-        logger.info(f"Shared LLM client initialized (model: {settings.openai_model})")
+
+        if settings.groq_api_key:
+            from langchain_groq import ChatGroq
+            _client = ChatGroq(
+                model=settings.groq_model,
+                api_key=settings.groq_api_key,
+                temperature=0,
+                streaming=True,
+            )
+            logger.info(f"Shared LLM client initialized (provider: Groq, model: {settings.groq_model})")
+        elif settings.openai_api_key:
+            from langchain_openai import ChatOpenAI
+            _client = ChatOpenAI(
+                model=settings.openai_model,
+                api_key=settings.openai_api_key,
+                temperature=0,
+                streaming=True,
+            )
+            logger.info(f"Shared LLM client initialized (provider: OpenAI, model: {settings.openai_model})")
+        else:
+            logger.debug("No LLM API key configured (GROQ_API_KEY or OPENAI_API_KEY); LLM features disabled")
     except Exception as e:
         logger.warning(f"LLM client initialization failed: {e}")
 

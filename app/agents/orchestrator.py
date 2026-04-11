@@ -3,11 +3,13 @@ Multi-Agent Orchestrator
 
 Coordinates the workflow between router, domain agents, validators, and query builder.
 Phase 4: conversation context, query history, smart suggestions, LangGraph primary.
+Phase 7: dynamic domain hot-reload.
 """
 
 import logging
 import re as _re
 import json as _json
+import threading as _threading
 from typing import Dict, Any, List, Optional, Tuple
 from enum import Enum
 from urllib.parse import urlparse
@@ -67,6 +69,9 @@ class Orchestrator:
         self.conversations: ConversationManager = get_conversation_manager()
         self._langraph = self._init_langraph(registry, db)
         self._query_count = 0
+
+        # Phase 7: load any previously-registered dynamic domains at startup
+        self.reload_domain_agents()
 
         logger.debug("Orchestrator initialized")
 
@@ -554,3 +559,73 @@ class Orchestrator:
             if info:
                 domains.append(info)
         return domains
+
+    # ------------------------------------------------------------------
+    # Phase 7: Dynamic domain hot-reload
+    # ------------------------------------------------------------------
+
+    def reload_domain_agents(self) -> None:
+        """
+        Reload dynamic domains from the DomainRegistry and merge them into
+        self.domain_agents.  Called after an admin registers or deletes a domain.
+        """
+        try:
+            from app.onboarding.registry import get_domain_registry
+            from app.onboarding.agent_factory import build_agent
+
+            registry = get_domain_registry()
+            for config in registry.list_domains():
+                agent = build_agent(config, self.registry, self.db, self.builder)
+                self.domain_agents[config.name] = agent
+                logger.info(f"Hot-loaded dynamic domain agent: {config.name!r}")
+
+            # Remove deleted dynamic domains (no longer in registry)
+            dynamic_names = {c.name for c in registry.list_domains()}
+            builtin = {"sales", "finance", "operations"}
+            for name in list(self.domain_agents.keys()):
+                if name not in builtin and name not in dynamic_names:
+                    del self.domain_agents[name]
+                    logger.info(f"Removed stale dynamic domain agent: {name!r}")
+        except Exception as e:
+            logger.warning(f"reload_domain_agents failed: {e}")
+
+
+# ------------------------------------------------------------------
+# Module-level shared orchestrator (Phase 7 hot-reload support)
+# ------------------------------------------------------------------
+
+_shared_orchestrator: Optional["Orchestrator"] = None
+_shared_lock = _threading.Lock()
+
+
+def _get_shared_orchestrator() -> Optional["Orchestrator"]:
+    """Return the shared Orchestrator instance if one has been created, else None."""
+    return _shared_orchestrator
+
+
+def set_shared_orchestrator(orch: "Orchestrator") -> None:
+    """Register a shared Orchestrator (called from app startup or first request)."""
+    global _shared_orchestrator
+    with _shared_lock:
+        _shared_orchestrator = orch
+
+
+def get_shared_or_new_orchestrator() -> "Orchestrator":
+    """
+    Return the shared Orchestrator, creating and registering one if needed.
+
+    All routes should use this instead of constructing Orchestrator directly —
+    ensures dynamic domains are visible and avoids redundant startup cost.
+    """
+    global _shared_orchestrator
+    if _shared_orchestrator is not None:
+        return _shared_orchestrator
+    with _shared_lock:
+        if _shared_orchestrator is None:
+            from app.views.registry import get_registry
+            from app.database.connection import get_db
+            from app.config import settings
+            registry = get_registry()
+            db = get_db(connection_string=settings.database_url)
+            _shared_orchestrator = Orchestrator(registry, db)
+    return _shared_orchestrator

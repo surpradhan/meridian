@@ -39,6 +39,11 @@ class QueryRequest(BaseModel):
         description="Session ID for multi-turn conversation context. "
                     "Omit to start a new conversation; reuse to continue an existing one.",
     )
+    explain: Optional[bool] = Field(
+        default=False,
+        description="Include an explain block showing routing decisions, "
+                    "views selected, filters extracted, and generated SQL",
+    )
 
     class Config:
         """Example for documentation."""
@@ -214,6 +219,16 @@ async def execute_query(
         # Mask sensitive fields based on user role
         if "result" in result:
             result["result"] = mask_sensitive_fields(result["result"], current_user.role)
+
+        # Phase 7: attach explain block when requested
+        if request.explain:
+            try:
+                from app.explain.builder import build_explain_response
+                trace = result.get("trace")
+                explain = build_explain_response(request.question, result, trace)
+                result["explain"] = explain.model_dump()
+            except Exception as e:
+                logger.warning(f"Explain generation failed (non-critical): {e}")
 
         return result
 

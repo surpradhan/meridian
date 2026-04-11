@@ -5,10 +5,11 @@ Chat-based interface for querying business data using natural language.
 Results are always displayed in clean tabular format.
 """
 
+import json
 import logging
 import os
 import tempfile
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 import pandas as pd
 import gradio as gr
 
@@ -81,6 +82,7 @@ def process_query(
     question: str,
     domain_choice: str,
     show_sql: bool,
+    show_explain: bool = False,
     conversation_id: Optional[str] = None,
 ):
     """
@@ -91,12 +93,13 @@ def process_query(
 
     Returns:
         Tuple of (DataFrame, error_html, metadata_html, csv_file_path,
-                  suggestions_list, conversation_id)
+                  suggestions_list, conversation_id, explain_data)
     """
     empty_df = pd.DataFrame()
+    no_explain: Dict[str, Any] = {}
 
     if not question.strip():
-        return empty_df, "", "", None, [], conversation_id
+        return empty_df, "", "", None, [], conversation_id, no_explain
 
     try:
         forced = None if domain_choice == "Auto-detect" else domain_choice.lower()
@@ -110,7 +113,7 @@ def process_query(
 
         if "error" in result and result["error"]:
             error_html = f'<div class="error-alert">⚠️ {result["error"]}</div>'
-            return empty_df, error_html, "", None, [], new_conv_id
+            return empty_df, error_html, "", None, [], new_conv_id, no_explain
 
         raw_results = result.get("result", [])
         df = format_result_as_table(raw_results)
@@ -125,7 +128,17 @@ def process_query(
             df.to_csv(tmp.name, index=False)
             csv_path = tmp.name
 
-        return df, "", metadata_html, csv_path, suggestions, new_conv_id
+        # Build explain data when requested
+        explain_data: Dict[str, Any] = {}
+        if show_explain:
+            try:
+                from app.explain.builder import build_explain_response
+                explain_resp = build_explain_response(question, result)
+                explain_data = explain_resp.model_dump()
+            except Exception as ex:
+                logger.warning(f"Explain generation failed: {ex}")
+
+        return df, "", metadata_html, csv_path, suggestions, new_conv_id, explain_data
 
     except Exception as e:
         logger.error(f"UI query failed: {e}", exc_info=True)
@@ -135,7 +148,37 @@ def process_query(
             f'Try rephrasing your question.'
             f'</div>'
         )
-        return empty_df, error_html, "", None, [], conversation_id
+        return empty_df, error_html, "", None, [], conversation_id, no_explain
+
+
+def export_results_as_json(raw_rows: Optional[List[Dict[str, Any]]]) -> Optional[str]:
+    """Write raw_rows to a temp JSON file and return the path."""
+    if not raw_rows:
+        return None
+    try:
+        from app.export.exporters import to_json
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".json", prefix="meridian_results_")
+        tmp.write(to_json(raw_rows))
+        tmp.flush()
+        return tmp.name
+    except Exception as e:
+        logger.error(f"JSON export failed: {e}")
+        return None
+
+
+def export_results_as_excel(raw_rows: Optional[List[Dict[str, Any]]]) -> Optional[str]:
+    """Write raw_rows to a temp Excel file and return the path."""
+    if not raw_rows:
+        return None
+    try:
+        from app.export.exporters import to_excel
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx", prefix="meridian_results_")
+        tmp.write(to_excel(raw_rows))
+        tmp.flush()
+        return tmp.name
+    except Exception as e:
+        logger.error(f"Excel export failed: {e}")
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -463,8 +506,23 @@ def build_ui() -> gr.Blocks:
                     visible=False,
                 )
 
-                download_file = gr.File(
-                    label="Download Results (CSV)",
+                with gr.Row():
+                    download_file = gr.File(
+                        label="Download CSV",
+                        visible=False,
+                    )
+                    download_json = gr.File(
+                        label="Download JSON",
+                        visible=False,
+                    )
+                    download_excel = gr.File(
+                        label="Download Excel",
+                        visible=False,
+                    )
+
+                # Phase 7: Explain panel
+                explain_panel = gr.JSON(
+                    label="Query Explanation",
                     visible=False,
                 )
 
@@ -489,6 +547,11 @@ def build_ui() -> gr.Blocks:
                         value=False,
                         info="Reveals the SQL query executed against the database.",
                     )
+                    show_explain = gr.Checkbox(
+                        label="Show explain mode",
+                        value=False,
+                        info="Shows routing decisions, views selected, filters, and SQL.",
+                    )
 
                 gr.Markdown("---")
 
@@ -504,6 +567,8 @@ def build_ui() -> gr.Blocks:
         # Stores the list of suggestion strings so button-click handlers can
         # read the text by index without needing JS or global state.
         suggestions_state = gr.State([])
+        # Stores raw result rows for export-on-demand
+        raw_rows_state = gr.State([])
 
         # ── Output lists ─────────────────────────────────────────────────────
 
@@ -524,10 +589,11 @@ def build_ui() -> gr.Blocks:
                 )
             return items
 
-        def run_query(question_val, domain_val, show_sql_val, history_val, conv_id):
+        def run_query(question_val, domain_val, show_sql_val, show_explain_val, history_val, conv_id):
             """Run a query; update all outputs, history panel, and button state."""
-            df, error_html, meta_html, csv_path, sugg_list, new_conv_id = process_query(
-                question_val, domain_val, show_sql_val, conversation_id=conv_id
+            df, error_html, meta_html, csv_path, sugg_list, new_conv_id, explain_data = process_query(
+                question_val, domain_val, show_sql_val,
+                show_explain=show_explain_val, conversation_id=conv_id,
             )
 
             new_history = list(history_val)
@@ -542,12 +608,24 @@ def build_ui() -> gr.Blocks:
             s1 = sugg_list[1] if len(sugg_list) > 1 else ""
             s2 = sugg_list[2] if len(sugg_list) > 2 else ""
 
+            # Extract raw rows for on-demand export
+            raw_rows = []
+            if hasattr(df, "to_dict"):
+                try:
+                    raw_rows = df.to_dict(orient="records")
+                except Exception:
+                    pass
+
             return (
                 gr.update(value=df, visible=True),                     # results_table
                 error_html,                                              # error_box
                 gr.update(visible=False),                                # welcome_group
                 meta_html,                                               # metadata
                 gr.update(value=csv_path, visible=bool(csv_path)),     # download_file
+                gr.update(value=None, visible=False),                   # download_json (reset)
+                gr.update(value=None, visible=False),                   # download_excel (reset)
+                gr.update(value=explain_data if explain_data else None,
+                          visible=bool(explain_data)),                  # explain_panel
                 gr.update(visible=have_suggs),                          # suggestions_group
                 gr.update(value=s0, visible=bool(s0)),                  # sugg_btn_0
                 gr.update(value=s1, visible=bool(s1)),                  # sugg_btn_1
@@ -557,6 +635,7 @@ def build_ui() -> gr.Blocks:
                 build_history_html(new_history),                        # history_display
                 new_conv_id,                                             # conversation_state
                 sugg_list,                                               # suggestions_state
+                raw_rows,                                                # raw_rows_state
             )
 
         def clear_all(history_val):
@@ -567,6 +646,9 @@ def build_ui() -> gr.Blocks:
                 gr.update(visible=True),                            # welcome_group
                 "",                                                 # metadata
                 gr.update(value=None, visible=False),              # download_file
+                gr.update(value=None, visible=False),              # download_json
+                gr.update(value=None, visible=False),              # download_excel
+                gr.update(value=None, visible=False),              # explain_panel
                 gr.update(visible=False),                           # suggestions_group
                 gr.update(value="", visible=False),                 # sugg_btn_0
                 gr.update(value="", visible=False),                 # sugg_btn_1
@@ -575,27 +657,39 @@ def build_ui() -> gr.Blocks:
                 gr.update(value="Ask", interactive=True),          # submit_btn
                 None,                                               # conversation_state
                 [],                                                 # suggestions_state
+                [],                                                 # raw_rows_state
             )
+
+        def do_export_json(raw_rows):
+            path = export_results_as_json(raw_rows)
+            return gr.update(value=path, visible=bool(path))
+
+        def do_export_excel(raw_rows):
+            path = export_results_as_excel(raw_rows)
+            return gr.update(value=path, visible=bool(path))
 
         # ── Output lists ─────────────────────────────────────────────────────
 
         CORE_OUTPUTS = [
-            results_table, error_box, welcome_group, metadata, download_file,
+            results_table, error_box, welcome_group, metadata,
+            download_file, download_json, download_excel, explain_panel,
             suggestions_group, sugg_btn_0, sugg_btn_1, sugg_btn_2,
         ]
         QUERY_OUTPUTS = CORE_OUTPUTS + [
             submit_btn, history_state, history_display,
-            conversation_state, suggestions_state,
+            conversation_state, suggestions_state, raw_rows_state,
         ]
 
         # ── Event wiring ─────────────────────────────────────────────────────
+
+        RUN_INPUTS = [question, domain_choice, show_sql, show_explain, history_state, conversation_state]
 
         submit_btn.click(
             fn=lambda: gr.update(value="Thinking…", interactive=False),
             outputs=submit_btn,
         ).then(
             fn=run_query,
-            inputs=[question, domain_choice, show_sql, history_state, conversation_state],
+            inputs=RUN_INPUTS,
             outputs=QUERY_OUTPUTS,
         )
 
@@ -604,14 +698,14 @@ def build_ui() -> gr.Blocks:
             outputs=submit_btn,
         ).then(
             fn=run_query,
-            inputs=[question, domain_choice, show_sql, history_state, conversation_state],
+            inputs=RUN_INPUTS,
             outputs=QUERY_OUTPUTS,
         )
 
         clear_btn.click(
             fn=clear_all,
             inputs=[history_state],
-            outputs=CORE_OUTPUTS + [question, submit_btn, conversation_state, suggestions_state],
+            outputs=CORE_OUTPUTS + [question, submit_btn, conversation_state, suggestions_state, raw_rows_state],
         )
 
         for btn, q in zip(sample_btns, SAMPLE_QUERIES):
@@ -620,9 +714,21 @@ def build_ui() -> gr.Blocks:
                 outputs=[question, submit_btn],
             ).then(
                 fn=run_query,
-                inputs=[question, domain_choice, show_sql, history_state, conversation_state],
+                inputs=RUN_INPUTS,
                 outputs=QUERY_OUTPUTS,
             )
+
+        # ── Export buttons ────────────────────────────────────────────────────
+        download_json.click(
+            fn=do_export_json,
+            inputs=[raw_rows_state],
+            outputs=[download_json],
+        )
+        download_excel.click(
+            fn=do_export_excel,
+            inputs=[raw_rows_state],
+            outputs=[download_excel],
+        )
 
         # ── Suggestion button clicks ──────────────────────────────────────────
         # Each button reads from suggestions_state by index so clicking it
@@ -640,7 +746,7 @@ def build_ui() -> gr.Blocks:
                 outputs=[question, submit_btn],
             ).then(
                 fn=run_query,
-                inputs=[question, domain_choice, show_sql, history_state, conversation_state],
+                inputs=RUN_INPUTS,
                 outputs=QUERY_OUTPUTS,
             )
 
