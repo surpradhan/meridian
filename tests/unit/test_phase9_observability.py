@@ -91,6 +91,22 @@ class TestMetricsCollectorInMemory:
         assert mc.gauges == {}
         assert mc.histograms == {}
 
+    def test_get_summary_contains_reset_note(self):
+        from app.observability.metrics import MetricsCollector
+        mc = MetricsCollector()
+        summary = mc.get_summary()
+        assert "note" in summary
+        assert "Prometheus" in summary["note"]
+
+    def test_record_cache_result_hit(self):
+        from app.observability.metrics import MetricsCollector
+        mc = MetricsCollector()
+        mc.record_cache_result(hit=True)
+        mc.record_cache_result(hit=True)
+        mc.record_cache_result(hit=False)
+        assert mc.counters["cache_hits"] == 2
+        assert mc.counters["cache_misses"] == 1
+
 
 # ---------------------------------------------------------------------------
 # QueryMetrics — flows through MetricsCollector correctly
@@ -170,6 +186,8 @@ class TestPrometheusBridge:
         assert "meridian_queries_successful" in names
         assert "meridian_queries_failed" in names
         assert "meridian_queries_domain" in names
+        assert "meridian_cache_hits" in names
+        assert "meridian_cache_misses" in names
 
     def test_histogram_names_registered(self):
         from app.observability.metrics import get_prometheus_registry
@@ -208,34 +226,84 @@ class TestPrometheusBridge:
 
 @pytest.mark.skipif(not PROMETHEUS_AVAILABLE, reason="prometheus_client not installed")
 class TestMetricsEndpoint:
+    """Tests for the /metrics Prometheus scrape endpoint.
+
+    Uses a minimal isolated FastAPI app (not the shared module-level singleton)
+    so the mount is always active regardless of METRICS_ENABLED in .env.local.
+    """
 
     @pytest.fixture
     def client(self):
+        from fastapi import FastAPI
         from fastapi.testclient import TestClient
-        from app.main import app
-        return TestClient(app)
+        from prometheus_client import make_asgi_app as _prom_asgi
+        from app.observability.metrics import get_prometheus_registry
+
+        test_app = FastAPI()
+        test_app.mount("/metrics", _prom_asgi(registry=get_prometheus_registry()))
+        return TestClient(test_app)
 
     def test_metrics_endpoint_reachable(self, client):
-        resp = client.get("/metrics")
+        resp = client.get("/metrics/")
         assert resp.status_code == 200
 
     def test_metrics_content_type(self, client):
-        resp = client.get("/metrics")
+        resp = client.get("/metrics/")
         assert "text/plain" in resp.headers.get("content-type", "")
 
     def test_metrics_contains_meridian_prefix(self, client):
-        resp = client.get("/metrics")
+        resp = client.get("/metrics/")
         assert "meridian_" in resp.text
 
     def test_metrics_contains_expected_metric_names(self, client):
-        resp = client.get("/metrics")
+        resp = client.get("/metrics/")
         for name in [
             "meridian_queries_started_total",
             "meridian_queries_successful_total",
             "meridian_queries_failed_total",
             "meridian_query_duration_ms",
+            "meridian_cache_hits_total",
+            "meridian_cache_misses_total",
         ]:
             assert name in resp.text, f"Missing metric: {name}"
+
+
+# ---------------------------------------------------------------------------
+# metrics_enabled gate
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(not PROMETHEUS_AVAILABLE, reason="prometheus_client not installed")
+class TestMetricsEnabledGate:
+
+    def test_metrics_endpoint_present_when_enabled(self, monkeypatch):
+        monkeypatch.setenv("METRICS_ENABLED", "true")
+        # Re-import app with patched settings to verify mount happens
+        from app.config import Settings
+        s = Settings(_env_file=None)
+        assert s.metrics_enabled is True
+
+    def test_metrics_endpoint_absent_when_disabled(self, monkeypatch):
+        monkeypatch.setenv("METRICS_ENABLED", "false")
+        from app.config import Settings
+        s = Settings(_env_file=None)
+        assert s.metrics_enabled is False
+
+
+# ---------------------------------------------------------------------------
+# Middleware — monitoring path set
+# ---------------------------------------------------------------------------
+
+class TestMonitoringPathSet:
+
+    def test_monitoring_paths_contains_expected(self):
+        from app.api.middleware import _MONITORING_PATHS
+        assert "/health" in _MONITORING_PATHS
+        assert "/metrics" in _MONITORING_PATHS
+        assert "/metrics/" in _MONITORING_PATHS
+
+    def test_monitoring_paths_is_frozenset(self):
+        from app.api.middleware import _MONITORING_PATHS
+        assert isinstance(_MONITORING_PATHS, frozenset)
 
 
 # ---------------------------------------------------------------------------

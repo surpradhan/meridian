@@ -39,6 +39,14 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         return response
 
 
+_MONITORING_PATHS: frozenset = frozenset({
+    "/health",
+    "/api/query/health",
+    "/metrics",
+    "/metrics/",   # Starlette redirects /metrics → /metrics/
+})
+
+
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """Sliding-window in-memory rate limiter (per IP, per minute)."""
 
@@ -50,7 +58,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         # Health and monitoring endpoints are exempt
-        if request.url.path in ("/health", "/api/query/health") or request.url.path.startswith("/metrics"):
+        if request.url.path in _MONITORING_PATHS:
             return await call_next(request)
 
         client_ip = request.client.host if request.client else "unknown"
@@ -97,7 +105,7 @@ class ConcurrentRequestMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         # Monitoring endpoints must never be blocked by the concurrency limiter
-        if request.url.path in ("/health",) or request.url.path.startswith("/metrics"):
+        if request.url.path in _MONITORING_PATHS:
             return await call_next(request)
 
         if self._semaphore is None:

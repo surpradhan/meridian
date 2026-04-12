@@ -14,6 +14,7 @@ services:
       - JAEGER_ENABLED=true
       - OTLP_ENDPOINT=http://jaeger:4318/v1/traces
       - METRICS_ENABLED=true
+      # /metrics is unauthenticated; restrict at the network layer in production
     depends_on:
       - postgres
       - redis

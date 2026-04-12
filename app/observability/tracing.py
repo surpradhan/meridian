@@ -114,9 +114,15 @@ class TracingManager:
                     endpoint=self.config.otlp_endpoint,
                 )
 
+                try:
+                    from app.config import settings as _settings
+                    _service_version = _settings.api_version
+                except Exception:
+                    _service_version = "unknown"
+
                 resource = Resource.create({
                     "service.name": self.config.service_name,
-                    "service.version": "0.9.0",
+                    "service.version": _service_version,
                 })
 
                 self.tracer_provider = TracerProvider(resource=resource)

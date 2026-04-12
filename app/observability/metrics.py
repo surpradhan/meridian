@@ -58,6 +58,18 @@ try:
         registry=_PROM,
     )
 
+    # --- cache counters ---
+    _prom_cache_hits = prom.Counter(
+        "meridian_cache_hits_total",
+        "Number of query results served from cache",
+        registry=_PROM,
+    )
+    _prom_cache_misses = prom.Counter(
+        "meridian_cache_misses_total",
+        "Number of cache lookups that missed",
+        registry=_PROM,
+    )
+
     PROMETHEUS_AVAILABLE = True
 except ImportError:
     PROMETHEUS_AVAILABLE = False
@@ -99,6 +111,10 @@ class MetricsCollector:
             elif name.startswith("queries_domain_"):
                 domain = name[len("queries_domain_"):]
                 _prom_queries_by_domain.labels(domain=domain).inc(value)
+            elif name == "cache_hits":
+                _prom_cache_hits.inc(value)
+            elif name == "cache_misses":
+                _prom_cache_misses.inc(value)
 
     def set_gauge(self, name: str, value: float) -> None:
         """Set a gauge metric value."""
@@ -106,6 +122,13 @@ class MetricsCollector:
 
         if PROMETHEUS_AVAILABLE and name == "last_query_rows":
             _prom_last_query_rows.set(value)
+
+    def record_cache_result(self, hit: bool) -> None:
+        """Record a cache hit or miss."""
+        if hit:
+            self.increment_counter("cache_hits")
+        else:
+            self.increment_counter("cache_misses")
 
     def record_histogram(self, name: str, value: float) -> None:
         """Record a histogram value."""
@@ -120,10 +143,16 @@ class MetricsCollector:
                 _prom_query_rows.observe(value)
 
     def get_summary(self) -> Dict[str, Any]:
-        """Get a JSON snapshot of all in-memory metrics."""
+        """Get a JSON snapshot of all in-memory metrics.
+
+        Note: counters in this snapshot reset when reset() is called or the
+        process restarts. Prometheus counters at /metrics are cumulative and
+        are NOT affected by reset().
+        """
         summary = {
             "timestamp": datetime.utcnow().isoformat(),
             "uptime_seconds": (datetime.utcnow() - self.start_time).total_seconds(),
+            "note": "Counters are in-memory only; reset() does not affect /metrics Prometheus values.",
             "counters": self.counters,
             "gauges": self.gauges,
             "histograms": {},

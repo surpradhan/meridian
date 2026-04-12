@@ -31,7 +31,7 @@ groups:
           summary: "Query error rate above 10 %"
           description: >
             More than 10 % of queries are failing (5-minute window).
-            Current rate: {{ printf "%.1f" (mul $value 100) }} %.
+            Current rate: {{ $value | humanizePercentage }}.
 
       - alert: CriticalQueryErrorRate
         expr: >

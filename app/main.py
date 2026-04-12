@@ -51,9 +51,11 @@ tracing = setup_tracing(
 )
 tracing.instrument_app(app)
 
-# Mount Prometheus /metrics scrape endpoint
+# Mount Prometheus /metrics scrape endpoint (gated on METRICS_ENABLED env var).
+# The endpoint is intentionally unauthenticated — standard Prometheus scraper
+# practice. Restrict access at the network layer (firewall / VPC / nginx allow).
 from app.observability.metrics import get_prometheus_registry, PROMETHEUS_AVAILABLE
-if PROMETHEUS_AVAILABLE:
+if PROMETHEUS_AVAILABLE and settings.metrics_enabled:
     from prometheus_client import make_asgi_app as _prom_asgi
     app.mount("/metrics", _prom_asgi(registry=get_prometheus_registry()))
 
