@@ -22,6 +22,13 @@ from app.config import settings
 from app.views.registry import get_registry
 from app.database.connection import get_db
 from app.agents.orchestrator import Orchestrator
+from app.ui.helpers import (
+    CHART_HEIGHT as _CHART_HEIGHT,
+    build_empty_chart,
+    build_plotly_figure,
+    thinking_label_dict as _thinking_label_dict,
+    pick_suggestion as _pick_suggestion_impl,
+)
 
 logging.basicConfig(level=logging.WARNING)
 logging.getLogger("app").setLevel(logging.INFO)
@@ -65,78 +72,6 @@ def format_result_as_table(result: list) -> pd.DataFrame:
         return pd.DataFrame({"Info": ["No results found."]})
     return pd.DataFrame(result)
 
-
-def build_empty_chart(message: str = "No data to visualise") -> go.Figure:
-    """Return a styled empty Plotly figure with a centred message.
-
-    Height is set to _CHART_HEIGHT (same as real charts) to prevent layout
-    shift when toggling between populated and empty Chart tab states.
-    """
-    fig = go.Figure()
-    fig.add_annotation(
-        text=message,
-        xref="paper", yref="paper",
-        x=0.5, y=0.5,
-        showarrow=False,
-        font=dict(size=15, color="#64748b", family="Inter, system-ui, sans-serif"),
-    )
-    fig.update_layout(
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(15,23,42,0.3)",
-        xaxis=dict(showgrid=False, showticklabels=False, zeroline=False),
-        yaxis=dict(showgrid=False, showticklabels=False, zeroline=False),
-        margin=dict(l=40, r=40, t=40, b=40),
-        height=_CHART_HEIGHT,
-    )
-    return fig
-
-
-def build_plotly_figure(rows: list, viz: dict) -> Optional[go.Figure]:
-    """Convert chart hint + result rows into a Plotly figure, or None for table/missing data."""
-    if not rows or not viz or viz.get("chart_type") == "table":
-        return None
-    df = pd.DataFrame(rows)
-    chart_type = viz.get("chart_type")
-    x = viz.get("x_axis")
-    y = viz.get("y_axis")
-    title = viz.get("reason", "")
-    if not x or not y or x not in df.columns or y not in df.columns:
-        return None
-    try:
-        # Meridian chart palette
-        layout_opts = dict(
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(15,23,42,0.5)",
-            font=dict(family="Inter, system-ui, sans-serif", color="#94a3b8"),
-            title_font=dict(color="#e2e8f0", size=14),
-            xaxis=dict(gridcolor="rgba(51,65,85,0.5)", zerolinecolor="#334155"),
-            yaxis=dict(gridcolor="rgba(51,65,85,0.5)", zerolinecolor="#334155"),
-            margin=dict(l=40, r=20, t=40, b=40),
-            height=_CHART_HEIGHT,
-        )
-        color_seq = ["#0d9488", "#f59e0b", "#6366f1", "#10b981", "#ef4444", "#8b5cf6"]
-        if chart_type == "line":
-            fig = px.line(df, x=x, y=y, title=title, color_discrete_sequence=color_seq)
-        elif chart_type == "bar":
-            fig = px.bar(df, x=x, y=y, title=title, color_discrete_sequence=color_seq)
-        elif chart_type == "pie":
-            fig = px.pie(df, names=x, values=y, title=title, color_discrete_sequence=color_seq)
-        else:
-            return None
-        fig.update_layout(**layout_opts)
-        return fig
-    except Exception as exc:
-        logger.debug(f"Plotly figure build failed (chart_type={chart_type!r}, x={x!r}, y={y!r}): {exc}")
-    return None
-
-
-# ---------------------------------------------------------------------------
-# Shared constants
-# ---------------------------------------------------------------------------
-
-# Height used for both real charts and the empty-state placeholder; keeping
-# them identical prevents layout shift when switching between states.
-_CHART_HEIGHT = 300
 
 # ---------------------------------------------------------------------------
 # SVG icon library (monochrome, 16x16, uses currentColor for theme compat)
@@ -1022,19 +957,18 @@ div[class*="block"] {
 # ---------------------------------------------------------------------------
 
 def _thinking_label(explain_on: bool) -> dict:
-    """Return a gr.update that sets the submit button to a loading state.
+    """Return a gr.update-compatible dict for the submit button loading state.
 
-    Label is context-aware: "Analysing…" when Explain mode is active
-    (signals the extra LLM step), otherwise the generic "Thinking…".
+    Delegates to app.ui.helpers.thinking_label_dict for the pure logic;
+    the returned dict is accepted by Gradio wherever gr.update() is expected.
+    Label is context-aware: "Analysing…" (Explain on) vs "Thinking…".
     """
-    label = "Analysing\u2026" if explain_on else "Thinking\u2026"
-    return gr.update(value=label, interactive=False)
+    return _thinking_label_dict(explain_on)
 
 
 def _pick_suggestion(idx: int, sugg: list, explain_on: bool = False):
     """Populate the question box from the suggestion list by index."""
-    text = sugg[idx] if idx < len(sugg) else ""
-    return text, _thinking_label(explain_on)
+    return _pick_suggestion_impl(idx, sugg, explain_on)
 
 
 # ---------------------------------------------------------------------------

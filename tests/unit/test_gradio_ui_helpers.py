@@ -1,20 +1,20 @@
 """
 Unit tests for MERIDIAN Gradio UI helper functions.
 
-These tests cover pure utility functions that have no external dependencies
-on the Gradio runtime or the orchestrator, so they run fast and without
-mocking the full app context.
+Imports from app.ui.helpers (not gradio_app) so the test module never
+touches the Gradio runtime.  This avoids the transitive huggingface_hub
+dependency that can break CI when package versions are mismatched.
 """
 
 import pytest
 import plotly.graph_objects as go
 
-from gradio_app import (
-    _CHART_HEIGHT,
+from app.ui.helpers import (
+    CHART_HEIGHT,
     build_empty_chart,
     build_plotly_figure,
-    _thinking_label,
-    _pick_suggestion,
+    thinking_label_dict,
+    pick_suggestion,
 )
 
 
@@ -41,7 +41,7 @@ class TestBuildEmptyChart:
 
     def test_height_matches_shared_constant(self):
         fig = build_empty_chart()
-        assert fig.layout.height == _CHART_HEIGHT
+        assert fig.layout.height == CHART_HEIGHT
 
     def test_transparent_background(self):
         fig = build_empty_chart()
@@ -65,14 +65,14 @@ class TestBuildPlotlyFigureHeight:
         viz = {"chart_type": "bar", "x_axis": "cat", "y_axis": "val", "reason": "test"}
         fig = build_plotly_figure(rows, viz)
         assert fig is not None
-        assert fig.layout.height == _CHART_HEIGHT
+        assert fig.layout.height == CHART_HEIGHT
 
     def test_line_chart_height_matches_constant(self):
         rows = [{"x": 1, "y": 5}, {"x": 2, "y": 8}]
         viz = {"chart_type": "line", "x_axis": "x", "y_axis": "y", "reason": ""}
         fig = build_plotly_figure(rows, viz)
         assert fig is not None
-        assert fig.layout.height == _CHART_HEIGHT
+        assert fig.layout.height == CHART_HEIGHT
 
     def test_returns_none_for_missing_columns(self):
         rows = [{"a": 1}]
@@ -88,44 +88,44 @@ class TestBuildPlotlyFigureHeight:
 
 
 # ---------------------------------------------------------------------------
-# _thinking_label
+# thinking_label_dict
 # ---------------------------------------------------------------------------
 
-class TestThinkingLabel:
+class TestThinkingLabelDict:
 
     def test_explain_off_says_thinking(self):
-        result = _thinking_label(False)
+        result = thinking_label_dict(False)
         assert result["value"] == "Thinking\u2026"
         assert result["interactive"] is False
 
     def test_explain_on_says_analysing(self):
-        result = _thinking_label(True)
+        result = thinking_label_dict(True)
         assert result["value"] == "Analysing\u2026"
         assert result["interactive"] is False
 
     def test_returns_dict(self):
-        assert isinstance(_thinking_label(False), dict)
+        assert isinstance(thinking_label_dict(False), dict)
 
 
 # ---------------------------------------------------------------------------
-# _pick_suggestion
+# pick_suggestion
 # ---------------------------------------------------------------------------
 
 class TestPickSuggestion:
 
     def test_returns_text_at_index(self):
         sugg = ["Q1", "Q2", "Q3"]
-        text, btn = _pick_suggestion(1, sugg, explain_on=False)
+        text, btn = pick_suggestion(1, sugg, explain_on=False)
         assert text == "Q2"
 
     def test_explain_off_label(self):
-        text, btn = _pick_suggestion(0, ["Q"], explain_on=False)
+        text, btn = pick_suggestion(0, ["Q"], explain_on=False)
         assert btn["value"] == "Thinking\u2026"
 
     def test_explain_on_label(self):
-        text, btn = _pick_suggestion(0, ["Q"], explain_on=True)
+        text, btn = pick_suggestion(0, ["Q"], explain_on=True)
         assert btn["value"] == "Analysing\u2026"
 
     def test_out_of_range_index_returns_empty(self):
-        text, _ = _pick_suggestion(5, ["only one"], explain_on=False)
+        text, _ = pick_suggestion(5, ["only one"], explain_on=False)
         assert text == ""
