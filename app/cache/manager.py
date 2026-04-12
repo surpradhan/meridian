@@ -44,6 +44,8 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+from app.observability.metrics import get_metrics_collector
+
 
 class CacheConfig:
     """Configuration for caching."""
@@ -137,6 +139,7 @@ class CacheManager:
         """
         if not self.client:
             self.stats["misses"] += 1
+            get_metrics_collector().record_cache_result(hit=False)
             return None
 
         try:
@@ -145,16 +148,19 @@ class CacheManager:
 
             if cached:
                 self.stats["hits"] += 1
+                get_metrics_collector().record_cache_result(hit=True)
                 result = json.loads(cached)
                 logger.debug(f"Cache hit for key: {key}")
                 return result
             else:
                 self.stats["misses"] += 1
+                get_metrics_collector().record_cache_result(hit=False)
                 return None
 
         except Exception as e:
             logger.error(f"Cache get failed: {e}")
             self.stats["misses"] += 1
+            get_metrics_collector().record_cache_result(hit=False)
             return None
 
     def set(
@@ -206,6 +212,7 @@ class CacheManager:
         """
         if not self.client:
             self.stats["misses"] += 1
+            get_metrics_collector().record_cache_result(hit=False)
             return None
 
         try:
@@ -213,13 +220,16 @@ class CacheManager:
             cached = self.client.get(key)
             if cached:
                 self.stats["hits"] += 1
+                get_metrics_collector().record_cache_result(hit=True)
                 logger.debug(f"Cache hit for result key: {key}")
                 return json.loads(cached)
             self.stats["misses"] += 1
+            get_metrics_collector().record_cache_result(hit=False)
             return None
         except Exception as e:
             logger.error(f"Cache get_result failed: {e}")
             self.stats["misses"] += 1
+            get_metrics_collector().record_cache_result(hit=False)
             return None
 
     def set_result(self, query: str, result: Dict, ttl_seconds: Optional[int] = None) -> bool:

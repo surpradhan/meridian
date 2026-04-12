@@ -33,12 +33,11 @@ class TestDistributedTracing:
         """Test tracing configuration."""
         config = TracingConfig(
             service_name="test-service",
-            jaeger_host="localhost",
-            jaeger_port=6831,
-            enabled=False,  # Don't connect to Jaeger
+            otlp_endpoint="http://localhost:4318/v1/traces",
+            enabled=False,
         )
         assert config.service_name == "test-service"
-        assert config.jaeger_host == "localhost"
+        assert config.otlp_endpoint == "http://localhost:4318/v1/traces"
 
     def test_tracing_manager_singleton(self):
         """Test TracingManager singleton pattern."""

@@ -63,9 +63,14 @@ class Settings(BaseSettings):
 
     # Observability
     metrics_enabled: bool = Field(default=False, description="Enable metrics")
-    jaeger_enabled: bool = Field(default=False, description="Enable Jaeger tracing")
-    jaeger_agent_host: str = Field(default="localhost", description="Jaeger agent host")
-    jaeger_agent_port: int = Field(default=6831, description="Jaeger agent port")
+    jaeger_enabled: bool = Field(default=False, description="Enable Jaeger/OTLP tracing")
+    otlp_endpoint: str = Field(
+        default="http://localhost:4318/v1/traces",
+        description="OTLP HTTP traces endpoint (Jaeger all-in-one default port 4318)",
+    )
+    # Legacy fields kept for env-var compatibility; otlp_endpoint takes precedence.
+    jaeger_agent_host: str = Field(default="localhost", description="Jaeger agent host (legacy)")
+    jaeger_agent_port: int = Field(default=6831, description="Jaeger agent port (legacy)")
 
     # Security / Authentication
     secret_key: str = Field(
