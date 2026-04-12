@@ -1,6 +1,6 @@
 # MERIDIAN Roadmap
 
-## Current State (Phase 8 Complete — April 2026)
+## Current State (Phase 9 Complete — April 2026)
 
 | Layer | Maturity | Notes |
 |-------|----------|-------|
@@ -10,11 +10,11 @@
 | REST API | 95% | JWT + OAuth2/OIDC-authenticated endpoints; history API; pagination; rate limiting; admin domain onboarding |
 | UI (Gradio) | 90% | History sidebar (clickable), interactive suggestion buttons, multi-turn sessions, Plotly interactive charts, JSON/Excel export buttons |
 | Security | 95% | JWT auth + RBAC (admin/analyst/viewer), OAuth2/OIDC SSO (Google + generic OIDC), domain-level access control, audit logging, CORS |
-| Observability | 75% | Structured JSON logging; OpenTelemetry spans wired in orchestrator; query metrics (counters, histograms); Jaeger export scaffolded |
+| Observability | 100% | Structured JSON logging; OTel spans → Jaeger via OTLP HTTP; Prometheus `/metrics` scrape endpoint; Grafana dashboard (latency p50/p95/p99, error rate, cache hit, domain breakdown); alert rules |
 | Caching & Performance | 75% | Redis cache active with context-scoped keys; async execution; index advisor live |
 | Visualization | 95% | Chart-type hints + interactive Plotly charts (line/bar/pie) fully wired in Gradio UI |
 
-**Overall: ~95% — 541+ tests passing (unit + integration)**
+**Overall: ~96% — 571+ tests passing (unit + integration)**
 
 ---
 
@@ -30,6 +30,7 @@
 | 6 | Advanced query — HAVING, window functions, CTEs, ORDER BY, full parameterization, multi-hop BFS join pathfinding, time intelligence, visualization hints | Complete |
 | 7 | Scale & polish | Complete |
 | 8 | Security & observability — OAuth2/OIDC SSO, SQL syntax validation, Plotly charts, observability wiring | Complete |
+| 9 | Observability completion — Prometheus dual-write, OTLP/Jaeger export, Grafana dashboards, alert rules | Complete |
 
 ---
 

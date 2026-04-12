@@ -1,5 +1,24 @@
 # MERIDIAN Changelog
 
+## v0.9.0 — Phase 9: Observability Completion (2026-04-12)
+
+- **Prometheus dual-write**: `MetricsCollector` now writes every counter/histogram/gauge to a dedicated `prometheus_client` registry simultaneously — the in-memory JSON snapshot (`GET /api/admin/metrics`) is unchanged; the Prometheus scrape endpoint is new
+- **`/metrics` scrape endpoint**: Prometheus ASGI app mounted at `/metrics`; exempt from rate-limit and concurrent-request middleware so scrapers are never blocked
+- **OTLP exporter**: Deprecated `jaeger-thrift` UDP exporter replaced with `OTLPSpanExporter` (HTTP, port 4318); `OTLP_ENDPOINT` env var controls the destination; `JAEGER_AGENT_HOST/PORT` kept as no-op legacy vars
+- **Prometheus metrics exposed**:
+  - `meridian_queries_started_total`, `meridian_queries_successful_total`, `meridian_queries_failed_total` (counters)
+  - `meridian_queries_domain_total{domain=...}` (counter with label)
+  - `meridian_query_duration_ms` histogram (buckets: 25 ms … 10 s)
+  - `meridian_query_rows` histogram
+  - `meridian_last_query_rows` gauge
+- **Docker observability stack** (`docker-compose.yml`):
+  - `jaeger` (all-in-one 1.55) — UI on `:16686`, OTLP HTTP on `:4318`
+  - `prometheus` (v2.48.1) — scrapes `app:8000/metrics` every 15 s
+  - `grafana` (10.2.3) — auto-provisioned datasource + dashboard; admin password `meridian`
+- **Grafana dashboard** (`monitoring/grafana/provisioning/dashboards/meridian.json`): 8 panels covering queries/min, error rate, p95 latency, cache hit rate, latency percentile time-series, throughput time-series, domain bar chart, rows-returned percentiles
+- **Prometheus alert rules** (`monitoring/alerts.yml`): `MeridianDown`, `HighQueryErrorRate` (>10 %), `CriticalQueryErrorRate` (>30 %), `HighQueryLatencyP95` (>2 s), `CriticalQueryLatencyP95` (>5 s), `NoQueryActivity`
+- **Tests**: 571+ passing (30 new in `tests/unit/test_phase9_observability.py`)
+
 ## v0.8.0 — Phase 8: Security & Observability (2026-04-12)
 
 - **OAuth2 / OIDC SSO**: Google OAuth2 and generic OIDC (Okta, Keycloak, Azure AD, etc.) via `GET /api/auth/oauth/authorize` and `GET /api/auth/oauth/callback`; new users auto-provisioned as `viewer`

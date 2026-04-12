@@ -1,0 +1,92 @@
+groups:
+  - name: meridian.rules
+    interval: 30s
+    rules:
+
+      # ── Service availability ───────────────────────────────────────────────
+
+      - alert: MeridianDown
+        expr: up{job="meridian"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Meridian API is unreachable"
+          description: >
+            The Meridian application has not been scrapeable for more than 1 minute.
+            Check the container logs and health endpoint.
+
+      # ── Error rate ─────────────────────────────────────────────────────────
+
+      - alert: HighQueryErrorRate
+        expr: >
+          rate(meridian_queries_failed_total[5m])
+          /
+          (rate(meridian_queries_started_total[5m]) + 1e-9)
+          > 0.10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Query error rate above 10 %"
+          description: >
+            More than 10 % of queries are failing (5-minute window).
+            Current rate: {{ printf "%.1f" (mul $value 100) }} %.
+
+      - alert: CriticalQueryErrorRate
+        expr: >
+          rate(meridian_queries_failed_total[5m])
+          /
+          (rate(meridian_queries_started_total[5m]) + 1e-9)
+          > 0.30
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Query error rate above 30 %"
+          description: >
+            More than 30 % of queries are failing (5-minute window).
+            Immediate investigation required.
+
+      # ── Latency ───────────────────────────────────────────────────────────
+
+      - alert: HighQueryLatencyP95
+        expr: >
+          histogram_quantile(0.95,
+            rate(meridian_query_duration_ms_bucket[5m])
+          ) > 2000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p95 query latency above 2 s"
+          description: >
+            The 95th-percentile query duration has exceeded 2 000 ms for
+            5 minutes. Current p95: {{ printf "%.0f" $value }} ms.
+
+      - alert: CriticalQueryLatencyP95
+        expr: >
+          histogram_quantile(0.95,
+            rate(meridian_query_duration_ms_bucket[5m])
+          ) > 5000
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "p95 query latency above 5 s"
+          description: >
+            The 95th-percentile query duration has exceeded 5 000 ms.
+            Current p95: {{ printf "%.0f" $value }} ms.
+
+      # ── Throughput ────────────────────────────────────────────────────────
+
+      - alert: NoQueryActivity
+        expr: rate(meridian_queries_started_total[10m]) == 0
+        for: 10m
+        labels:
+          severity: info
+        annotations:
+          summary: "No queries received in the last 10 minutes"
+          description: >
+            Meridian has received zero queries for 10 minutes.
+            This may be expected outside business hours.

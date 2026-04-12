@@ -43,14 +43,19 @@ app.add_middleware(
 # Setup additional middleware (auth, logging, etc)
 setup_middleware(app)
 
-# Initialize distributed tracing
+# Initialize distributed tracing (OTLP HTTP → Jaeger)
 tracing = setup_tracing(
     service_name="meridian",
-    jaeger_host=settings.jaeger_agent_host,
-    jaeger_port=settings.jaeger_agent_port,
+    otlp_endpoint=settings.otlp_endpoint,
     enabled=settings.jaeger_enabled,
 )
 tracing.instrument_app(app)
+
+# Mount Prometheus /metrics scrape endpoint
+from app.observability.metrics import get_prometheus_registry, PROMETHEUS_AVAILABLE
+if PROMETHEUS_AVAILABLE:
+    from prometheus_client import make_asgi_app as _prom_asgi
+    app.mount("/metrics", _prom_asgi(registry=get_prometheus_registry()))
 
 # Register API routes
 from app.api.routes import query as query_routes

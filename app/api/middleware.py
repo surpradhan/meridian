@@ -49,8 +49,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._windows: Dict[str, List[float]] = defaultdict(list)
 
     async def dispatch(self, request: Request, call_next):
-        # Health checks are exempt
-        if request.url.path in ("/health", "/api/query/health"):
+        # Health and monitoring endpoints are exempt
+        if request.url.path in ("/health", "/api/query/health") or request.url.path.startswith("/metrics"):
             return await call_next(request)
 
         client_ip = request.client.host if request.client else "unknown"
@@ -96,6 +96,10 @@ class ConcurrentRequestMiddleware(BaseHTTPMiddleware):
         self._semaphore: Optional[asyncio.Semaphore] = None
 
     async def dispatch(self, request: Request, call_next):
+        # Monitoring endpoints must never be blocked by the concurrency limiter
+        if request.url.path in ("/health",) or request.url.path.startswith("/metrics"):
+            return await call_next(request)
+
         if self._semaphore is None:
             self._semaphore = asyncio.Semaphore(self.max_concurrent)
 
