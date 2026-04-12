@@ -67,7 +67,11 @@ def format_result_as_table(result: list) -> pd.DataFrame:
 
 
 def build_empty_chart(message: str = "No data to visualise") -> go.Figure:
-    """Return a styled empty Plotly figure with a centred message."""
+    """Return a styled empty Plotly figure with a centred message.
+
+    Height is set to _CHART_HEIGHT (same as real charts) to prevent layout
+    shift when toggling between populated and empty Chart tab states.
+    """
     fig = go.Figure()
     fig.add_annotation(
         text=message,
@@ -82,7 +86,7 @@ def build_empty_chart(message: str = "No data to visualise") -> go.Figure:
         xaxis=dict(showgrid=False, showticklabels=False, zeroline=False),
         yaxis=dict(showgrid=False, showticklabels=False, zeroline=False),
         margin=dict(l=40, r=40, t=40, b=40),
-        height=260,
+        height=_CHART_HEIGHT,
     )
     return fig
 
@@ -108,6 +112,7 @@ def build_plotly_figure(rows: list, viz: dict) -> Optional[go.Figure]:
             xaxis=dict(gridcolor="rgba(51,65,85,0.5)", zerolinecolor="#334155"),
             yaxis=dict(gridcolor="rgba(51,65,85,0.5)", zerolinecolor="#334155"),
             margin=dict(l=40, r=20, t=40, b=40),
+            height=_CHART_HEIGHT,
         )
         color_seq = ["#0d9488", "#f59e0b", "#6366f1", "#10b981", "#ef4444", "#8b5cf6"]
         if chart_type == "line":
@@ -126,18 +131,62 @@ def build_plotly_figure(rows: list, viz: dict) -> Optional[go.Figure]:
 
 
 # ---------------------------------------------------------------------------
-# SVG icon library (monochrome, 16x16)
+# Shared constants
 # ---------------------------------------------------------------------------
 
-_ICON_DOMAIN = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="1" y="1" width="6" height="6" rx="1.5" stroke="currentColor" stroke-width="1.5"/><rect x="9" y="1" width="6" height="6" rx="1.5" stroke="currentColor" stroke-width="1.5"/><rect x="1" y="9" width="6" height="6" rx="1.5" stroke="currentColor" stroke-width="1.5"/><rect x="9" y="9" width="6" height="6" rx="1.5" stroke="currentColor" stroke-width="1.5"/></svg>'
+# Height used for both real charts and the empty-state placeholder; keeping
+# them identical prevents layout shift when switching between states.
+_CHART_HEIGHT = 300
 
-_ICON_TARGET = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="3" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="1" fill="currentColor"/></svg>'
+# ---------------------------------------------------------------------------
+# SVG icon library (monochrome, 16x16, uses currentColor for theme compat)
+# ---------------------------------------------------------------------------
 
-_ICON_CHECK = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.5"/><path d="M5 8.5L7 10.5L11 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+_ICON_DOMAIN = (
+    '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" '
+    'xmlns="http://www.w3.org/2000/svg">'
+    '<rect x="1" y="1" width="6" height="6" rx="1.5" stroke="currentColor" stroke-width="1.5"/>'
+    '<rect x="9" y="1" width="6" height="6" rx="1.5" stroke="currentColor" stroke-width="1.5"/>'
+    '<rect x="1" y="9" width="6" height="6" rx="1.5" stroke="currentColor" stroke-width="1.5"/>'
+    '<rect x="9" y="9" width="6" height="6" rx="1.5" stroke="currentColor" stroke-width="1.5"/>'
+    '</svg>'
+)
 
-_ICON_ROWS = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="1.5" y="2" width="13" height="12" rx="2" stroke="currentColor" stroke-width="1.5"/><line x1="1.5" y1="6" x2="14.5" y2="6" stroke="currentColor" stroke-width="1.5"/><line x1="1.5" y1="10" x2="14.5" y2="10" stroke="currentColor" stroke-width="1.5"/></svg>'
+_ICON_TARGET = (
+    '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" '
+    'xmlns="http://www.w3.org/2000/svg">'
+    '<circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.5"/>'
+    '<circle cx="8" cy="8" r="3" stroke="currentColor" stroke-width="1.5"/>'
+    '<circle cx="8" cy="8" r="1" fill="currentColor"/>'
+    '</svg>'
+)
 
-_ICON_VIEW = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1 8C1 8 4 3 8 3C12 3 15 8 15 8C15 8 12 13 8 13C4 13 1 8 1 8Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="8" r="2.5" stroke="currentColor" stroke-width="1.5"/></svg>'
+_ICON_CHECK = (
+    '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" '
+    'xmlns="http://www.w3.org/2000/svg">'
+    '<circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.5"/>'
+    '<path d="M5 8.5L7 10.5L11 6" stroke="currentColor" stroke-width="1.5" '
+    'stroke-linecap="round" stroke-linejoin="round"/>'
+    '</svg>'
+)
+
+_ICON_ROWS = (
+    '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" '
+    'xmlns="http://www.w3.org/2000/svg">'
+    '<rect x="1.5" y="2" width="13" height="12" rx="2" stroke="currentColor" stroke-width="1.5"/>'
+    '<line x1="1.5" y1="6" x2="14.5" y2="6" stroke="currentColor" stroke-width="1.5"/>'
+    '<line x1="1.5" y1="10" x2="14.5" y2="10" stroke="currentColor" stroke-width="1.5"/>'
+    '</svg>'
+)
+
+_ICON_VIEW = (
+    '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" '
+    'xmlns="http://www.w3.org/2000/svg">'
+    '<path d="M1 8C1 8 4 3 8 3C12 3 15 8 15 8C15 8 12 13 8 13C4 13 1 8 1 8Z" '
+    'stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>'
+    '<circle cx="8" cy="8" r="2.5" stroke="currentColor" stroke-width="1.5"/>'
+    '</svg>'
+)
 
 
 def build_metadata_html(result: dict, show_sql: bool) -> str:
@@ -315,7 +364,7 @@ HEADER_HTML = f"""
     <span class="topbar-tagline">Intelligent Data Navigation</span>
   </div>
   <div class="topbar-actions">
-    <span class="topbar-shortcut" title="Focus search (⌘/)">&#8984;/</span>
+    <span class="topbar-shortcut" title="Focus search (⌘/ on Mac, Ctrl+/ on Windows/Linux)">⌘/ · Ctrl+/</span>
   </div>
 </div>
 """
@@ -351,8 +400,10 @@ EMPTY_STATE_HTML = """
 </div>
 """
 
+# Plain JS — injected via gr.Blocks(js=...) which runs after the UI loads.
+# Using the js= parameter is more reliable than gr.HTML(<script>), which
+# Gradio may sanitise away depending on its security settings.
 KEYBOARD_JS = """
-<script>
 document.addEventListener('keydown', function(e) {
     if ((e.metaKey || e.ctrlKey) && e.key === '/') {
         e.preventDefault();
@@ -360,7 +411,6 @@ document.addEventListener('keydown', function(e) {
         if (ta) { ta.focus(); ta.select(); }
     }
 });
-</script>
 """
 
 # ---------------------------------------------------------------------------
@@ -368,6 +418,11 @@ document.addEventListener('keydown', function(e) {
 # ---------------------------------------------------------------------------
 
 MERIDIAN_CSS = """
+/* ── Google Fonts ───────────────────────────────────────── */
+/* @import must precede all other rules (CSS spec §6.3).    */
+/* Falls back to system-ui / monospace if CDN unavailable.  */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
 /* ── CSS Variables ──────────────────────────────────────── */
 :root {
     --m-navy:       #0B1120;
@@ -392,9 +447,6 @@ MERIDIAN_CSS = """
     --m-radius-lg:  14px;
     --m-transition: 180ms cubic-bezier(0.4, 0, 0.2, 1);
 }
-
-/* ── Google Fonts ───────────────────────────────────────── */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@700;800&family=JetBrains+Mono:wght@400;500&display=swap');
 
 /* ── Base overrides ─────────────────────────────────────── */
 body, .gradio-container {
@@ -879,7 +931,6 @@ div[class*="block"] {
     max-width: 200px !important;
 }
 @media (max-width: 1280px) {
-    .export-row { flex-wrap: wrap !important; }
     .export-row .file-preview { max-width: 160px !important; }
 }
 
@@ -967,6 +1018,26 @@ div[class*="block"] {
 
 
 # ---------------------------------------------------------------------------
+# Module-level UI helpers (pure functions — no closure dependencies)
+# ---------------------------------------------------------------------------
+
+def _thinking_label(explain_on: bool) -> dict:
+    """Return a gr.update that sets the submit button to a loading state.
+
+    Label is context-aware: "Analysing…" when Explain mode is active
+    (signals the extra LLM step), otherwise the generic "Thinking…".
+    """
+    label = "Analysing\u2026" if explain_on else "Thinking\u2026"
+    return gr.update(value=label, interactive=False)
+
+
+def _pick_suggestion(idx: int, sugg: list, explain_on: bool = False):
+    """Populate the question box from the suggestion list by index."""
+    text = sugg[idx] if idx < len(sugg) else ""
+    return text, _thinking_label(explain_on)
+
+
+# ---------------------------------------------------------------------------
 # UI Layout
 # ---------------------------------------------------------------------------
 
@@ -985,10 +1056,8 @@ def build_ui() -> gr.Blocks:
         title="MERIDIAN \u2014 Intelligent Data Navigation",
         theme=theme,
         css=MERIDIAN_CSS,
+        js=KEYBOARD_JS,
     ) as app:
-
-        # Inject keyboard shortcut handler
-        gr.HTML(KEYBOARD_JS)
 
         # ── Top bar ─────────────────────────────────────────────────
         gr.HTML(HEADER_HTML)
@@ -1040,7 +1109,7 @@ def build_ui() -> gr.Blocks:
                     elem_id="domain-nav",
                 )
 
-                with gr.Accordion("Options", open=False):
+                with gr.Accordion("Advanced Options", open=False):
                     show_sql = gr.Checkbox(
                         label="Show SQL",
                         value=False,
@@ -1169,7 +1238,10 @@ def build_ui() -> gr.Blocks:
                     chart_fig = build_empty_chart("Results are best viewed in the Table tab")
             else:
                 chart_fig = fig
-            has_results = bool(raw_rows) or bool(error_html)
+            # Only show result tabs when there is actual data.
+            # Showing tabs on error-only responses would expose empty
+            # Table / Chart / Explain panels, which is confusing.
+            has_results = bool(raw_rows)
 
             return (
                 gr.update(value=df, visible=True),                     # results_table
@@ -1248,10 +1320,6 @@ def build_ui() -> gr.Blocks:
 
         RUN_INPUTS = [question, domain_choice, show_sql, show_explain, history_state, conversation_state]
 
-        def _thinking_label(explain_on):
-            label = "Analysing\u2026" if explain_on else "Thinking\u2026"
-            return gr.update(value=label, interactive=False)
-
         submit_btn.click(
             fn=_thinking_label,
             inputs=[show_explain],
@@ -1302,13 +1370,9 @@ def build_ui() -> gr.Blocks:
         )
 
         # ── Suggestion button clicks ────────────────────────────────
-        def pick_suggestion(idx: int, sugg: list, explain_on: bool = False):
-            text = sugg[idx] if idx < len(sugg) else ""
-            return text, _thinking_label(explain_on)
-
         for btn_idx, sugg_btn in enumerate([sugg_btn_0, sugg_btn_1, sugg_btn_2]):
             sugg_btn.click(
-                fn=lambda s, e, i=btn_idx: pick_suggestion(i, s, e),
+                fn=lambda s, e, i=btn_idx: _pick_suggestion(i, s, e),
                 inputs=[suggestions_state, show_explain],
                 outputs=[question, submit_btn],
             ).then(
