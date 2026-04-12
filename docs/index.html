@@ -4,18 +4,25 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>MERIDIAN — Intelligent Data Navigation Platform</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --bg: #0d0f14;
-      --surface: #161b27;
-      --surface2: #1e2535;
-      --accent: #4f8ef7;
-      --accent2: #7c3aed;
-      --accent3: #06d6a0;
-      --text: #e2e8f0;
-      --muted: #8892a4;
-      --border: #2a3347;
-      --radius: 12px;
+      --bg:        #0B1120;
+      --bg-light:  #131c31;
+      --surface:   #1E293B;
+      --surface2:  #273549;
+      --border:    #334155;
+      --accent:    #0d9488;
+      --accent-dim:#0f766e;
+      --gold:      #f59e0b;
+      --text:      #e2e8f0;
+      --muted:     #94a3b8;
+      --muted2:    #64748b;
+      --radius:    10px;
+      --radius-lg: 14px;
+      --ease:      180ms cubic-bezier(0.4, 0, 0.2, 1);
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -23,90 +30,42 @@
     body {
       background: var(--bg);
       color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
       line-height: 1.6;
     }
 
     a { color: var(--accent); text-decoration: none; }
     a:hover { text-decoration: underline; }
 
-    /* NAV */
-    nav {
-      position: sticky;
-      top: 0;
-      z-index: 100;
-      background: rgba(13, 15, 20, 0.85);
-      backdrop-filter: blur(12px);
-      border-bottom: 1px solid var(--border);
-      padding: 0 2rem;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      height: 60px;
-    }
-    .nav-brand {
-      font-size: 1.2rem;
-      font-weight: 700;
-      letter-spacing: 0.08em;
-      background: linear-gradient(135deg, var(--accent), var(--accent2));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-    .nav-links { display: flex; gap: 1.5rem; list-style: none; }
-    .nav-links a { color: var(--muted); font-size: 0.9rem; transition: color 0.2s; }
-    .nav-links a:hover { color: var(--text); text-decoration: none; }
-
-    /* HERO */
+    /* ── HERO ─────────────────────────────────────────────── */
     .hero {
       position: relative;
       overflow: hidden;
-      padding: 6rem 2rem 5rem;
+      padding: 6rem 2rem 4rem;
       text-align: center;
+    }
+    .wordmark {
+      font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
+      font-size: 2.2rem;
+      font-weight: 800;
+      letter-spacing: 0.1em;
+      color: var(--accent);
+      margin-bottom: 0.75rem;
     }
     .hero::before {
       content: "";
       position: absolute;
       inset: 0;
-      background: radial-gradient(ellipse 80% 50% at 50% 0%, rgba(79,142,247,0.12) 0%, transparent 70%),
-                  radial-gradient(ellipse 50% 40% at 80% 80%, rgba(124,58,237,0.08) 0%, transparent 60%);
+      background:
+        radial-gradient(ellipse 80% 50% at 50% 0%, rgba(13,148,136,0.13) 0%, transparent 70%),
+        radial-gradient(ellipse 50% 40% at 80% 80%, rgba(245,158,11,0.07) 0%, transparent 60%);
       pointer-events: none;
     }
-    .badge {
-      display: inline-block;
-      padding: 0.3rem 0.9rem;
-      border-radius: 999px;
-      background: rgba(79,142,247,0.12);
-      border: 1px solid rgba(79,142,247,0.3);
-      color: var(--accent);
-      font-size: 0.8rem;
-      font-weight: 600;
-      letter-spacing: 0.05em;
-      margin-bottom: 1.5rem;
-    }
-    .hero h1 {
-      font-size: clamp(2.5rem, 6vw, 4rem);
-      font-weight: 800;
-      letter-spacing: -0.02em;
-      line-height: 1.1;
-      margin-bottom: 0.5rem;
-    }
-    .hero h1 span {
-      background: linear-gradient(135deg, var(--accent) 0%, var(--accent2) 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-    .tagline {
-      font-size: 1.1rem;
-      color: var(--accent3);
-      font-style: italic;
-      margin-bottom: 1.5rem;
-      letter-spacing: 0.03em;
-    }
     .hero-desc {
-      max-width: 600px;
+      max-width: 580px;
       margin: 0 auto 2.5rem;
       color: var(--muted);
-      font-size: 1.05rem;
+      font-size: 1.02rem;
     }
     .hero-actions { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
     .btn {
@@ -114,15 +73,15 @@
       align-items: center;
       gap: 0.4rem;
       padding: 0.7rem 1.5rem;
-      border-radius: 8px;
-      font-size: 0.95rem;
+      border-radius: var(--radius);
+      font-size: 0.93rem;
       font-weight: 600;
       cursor: pointer;
-      transition: opacity 0.2s, transform 0.15s;
+      transition: opacity var(--ease), transform var(--ease);
     }
     .btn:hover { opacity: 0.88; transform: translateY(-1px); text-decoration: none; }
     .btn-primary {
-      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dim) 100%);
       color: #fff;
     }
     .btn-outline {
@@ -131,11 +90,11 @@
       background: var(--surface);
     }
 
-    /* SECTIONS */
+    /* ── SECTIONS ─────────────────────────────────────────── */
     section { padding: 5rem 2rem; }
     .container { max-width: 1100px; margin: 0 auto; }
     .section-label {
-      font-size: 0.75rem;
+      font-size: 0.73rem;
       font-weight: 700;
       letter-spacing: 0.12em;
       text-transform: uppercase;
@@ -143,8 +102,9 @@
       margin-bottom: 0.75rem;
     }
     .section-title {
-      font-size: clamp(1.8rem, 4vw, 2.5rem);
-      font-weight: 700;
+      font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
+      font-size: clamp(1.8rem, 4vw, 2.4rem);
+      font-weight: 800;
       letter-spacing: -0.02em;
       margin-bottom: 1rem;
     }
@@ -154,62 +114,40 @@
       margin-bottom: 3rem;
     }
 
-    /* PROBLEM/SOLUTION */
-    .ps-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 2rem;
-    }
-    @media (max-width: 700px) { .ps-grid { grid-template-columns: 1fr; } }
-    .ps-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 2rem;
-    }
-    .ps-card h3 {
-      font-size: 1.1rem;
-      font-weight: 700;
-      margin-bottom: 1rem;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-    .ps-card ul { list-style: none; display: flex; flex-direction: column; gap: 0.6rem; }
-    .ps-card ul li { font-size: 0.95rem; color: var(--muted); display: flex; align-items: flex-start; gap: 0.6rem; }
-    .ps-card ul li span { flex-shrink: 0; }
-    .bad { color: #f87171; }
-    .good { color: var(--accent3); }
-
-    /* FEATURES */
+    /* ── FEATURES ─────────────────────────────────────────── */
     .features-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 1.5rem;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 1.25rem;
     }
     .feature-card {
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: var(--radius);
+      border-radius: var(--radius-lg);
       padding: 1.8rem;
-      transition: border-color 0.2s, transform 0.2s;
+      transition: border-color var(--ease), transform var(--ease);
     }
     .feature-card:hover { border-color: var(--accent); transform: translateY(-2px); }
     .feature-icon {
-      width: 44px;
-      height: 44px;
+      width: 42px;
+      height: 42px;
       border-radius: 10px;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 1.3rem;
+      font-size: 1.25rem;
       margin-bottom: 1rem;
     }
-    .feature-card h3 { font-size: 1rem; font-weight: 700; margin-bottom: 0.5rem; }
-    .feature-card p { font-size: 0.9rem; color: var(--muted); }
+    .feature-card h3 { font-size: 0.97rem; font-weight: 700; margin-bottom: 0.4rem; }
+    .feature-card p { font-size: 0.88rem; color: var(--muted); }
+    .bg1 { background: rgba(13,148,136,0.14); }
+    .bg2 { background: rgba(245,158,11,0.14); }
+    .bg3 { background: rgba(16,185,129,0.14); }
+    .bg4 { background: rgba(99,102,241,0.14); }
+    .bg5 { background: rgba(239,68,68,0.14); }
 
-    /* ARCHITECTURE */
-    .arch-section { background: var(--surface); }
+    /* ── ARCHITECTURE ─────────────────────────────────────── */
+    .arch-section { background: var(--bg-light); }
     .arch-flow {
       display: flex;
       flex-direction: column;
@@ -220,7 +158,7 @@
     }
     .arch-step {
       width: 100%;
-      background: var(--surface2);
+      background: var(--surface);
       border: 1px solid var(--border);
       border-radius: var(--radius);
       padding: 1rem 1.5rem;
@@ -238,150 +176,108 @@
       font-size: 1rem;
       flex-shrink: 0;
     }
-    .arch-step-text { font-size: 0.9rem; }
-    .arch-step-text strong { display: block; font-size: 0.95rem; }
-    .arch-step-text span { color: var(--muted); font-size: 0.82rem; }
-    .arch-arrow {
-      color: var(--accent);
-      font-size: 1.3rem;
-      line-height: 1;
-      padding: 0.2rem 0;
-    }
-    .bg1 { background: rgba(79,142,247,0.12); }
-    .bg2 { background: rgba(124,58,237,0.12); }
-    .bg3 { background: rgba(6,214,160,0.12); }
-    .bg4 { background: rgba(251,191,36,0.12); }
-    .bg5 { background: rgba(249,115,22,0.12); }
+    .arch-step-text { font-size: 0.88rem; }
+    .arch-step-text strong { display: block; font-size: 0.93rem; }
+    .arch-step-text span { color: var(--muted); font-size: 0.81rem; }
+    .arch-arrow { color: var(--accent); font-size: 1.2rem; line-height: 1; padding: 0.2rem 0; }
 
-    /* TECH STACK */
-    .stack-table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 0.95rem;
-    }
+    /* ── TECH STACK ───────────────────────────────────────── */
+    .stack-table { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
     .stack-table th {
       text-align: left;
       padding: 0.75rem 1rem;
       border-bottom: 1px solid var(--border);
       color: var(--muted);
-      font-size: 0.8rem;
+      font-size: 0.78rem;
       font-weight: 600;
-      letter-spacing: 0.06em;
+      letter-spacing: 0.07em;
       text-transform: uppercase;
     }
-    .stack-table td {
-      padding: 0.75rem 1rem;
-      border-bottom: 1px solid var(--border);
-    }
+    .stack-table td { padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); }
     .stack-table tr:last-child td { border-bottom: none; }
     .stack-table tr:hover td { background: var(--surface2); }
     .pill {
       display: inline-block;
-      padding: 0.2rem 0.6rem;
+      padding: 0.18rem 0.55rem;
       border-radius: 999px;
-      font-size: 0.78rem;
+      font-size: 0.76rem;
       font-weight: 600;
-      background: rgba(79,142,247,0.12);
+      background: rgba(13,148,136,0.12);
       color: var(--accent);
-      border: 1px solid rgba(79,142,247,0.2);
+      border: 1px solid rgba(13,148,136,0.22);
     }
 
-    /* PHASES */
-    .phases { display: flex; flex-direction: column; gap: 1rem; }
-    .phase {
-      display: flex;
-      gap: 1.25rem;
-      align-items: flex-start;
-    }
-    .phase-dot-col { display: flex; flex-direction: column; align-items: center; padding-top: 3px; }
-    .phase-dot {
-      width: 14px;
-      height: 14px;
-      border-radius: 50%;
-      flex-shrink: 0;
-    }
-    .phase-line { width: 2px; flex: 1; min-height: 24px; background: var(--border); margin-top: 4px; }
-    .phase:last-child .phase-line { display: none; }
-    .phase-body { padding-bottom: 1rem; }
-    .phase-body strong { font-size: 0.95rem; }
-    .phase-body p { font-size: 0.85rem; color: var(--muted); margin-top: 0.25rem; }
-    .done { background: var(--accent3); }
-    .in-progress { background: var(--accent); }
-    .planned { background: var(--border); }
-
-    /* QUICKSTART */
+    /* ── QUICK START ──────────────────────────────────────── */
     .qs-card {
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: var(--radius);
+      border-radius: var(--radius-lg);
       overflow: hidden;
     }
-    .qs-tabs { display: flex; border-bottom: 1px solid var(--border); }
+    .qs-tab-bar { display: flex; border-bottom: 1px solid var(--border); }
     .qs-tab {
-      padding: 0.75rem 1.25rem;
-      font-size: 0.85rem;
+      padding: 0.7rem 1.2rem;
+      font-size: 0.84rem;
       font-weight: 600;
-      color: var(--muted);
-      cursor: pointer;
-      border-bottom: 2px solid transparent;
-      transition: color 0.2s;
+      color: var(--accent);
+      border-bottom: 2px solid var(--accent);
     }
-    .qs-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
     pre {
-      background: #0a0c10;
+      background: #070d18;
       padding: 1.5rem;
       overflow-x: auto;
-      font-size: 0.85rem;
-      line-height: 1.7;
+      font-size: 0.84rem;
+      line-height: 1.75;
     }
-    code { font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace; }
+    code { font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace; }
     .comment { color: #4a5568; }
-    .cmd { color: var(--accent3); }
+    .cmd { color: var(--accent); }
 
-    /* FOOTER */
+    /* ── FOOTER ───────────────────────────────────────────── */
     footer {
       border-top: 1px solid var(--border);
       padding: 2.5rem 2rem;
       text-align: center;
       color: var(--muted);
-      font-size: 0.85rem;
+      font-size: 0.84rem;
     }
     footer .footer-brand {
+      font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
       font-size: 1rem;
-      font-weight: 700;
-      letter-spacing: 0.08em;
-      background: linear-gradient(135deg, var(--accent), var(--accent2));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      color: var(--accent);
       margin-bottom: 0.5rem;
     }
 
-    /* DIVIDER */
     .divider { height: 1px; background: var(--border); }
+
+    .arch-section .container {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4rem;
+      align-items: center;
+    }
+    @media (max-width: 700px) {
+      .arch-section .container { grid-template-columns: 1fr; gap: 2rem; }
+    }
   </style>
 </head>
 <body>
 
-<!-- NAV -->
-<nav>
-  <div class="nav-brand">🧭 MERIDIAN</div>
-  <ul class="nav-links">
-    <li><a href="#features">Features</a></li>
-    <li><a href="#architecture">Architecture</a></li>
-    <li><a href="#roadmap">Roadmap</a></li>
-    <li><a href="#quickstart">Quick Start</a></li>
-    <li><a href="https://github.com/surpradhan/meridian" target="_blank">GitHub ↗</a></li>
-  </ul>
-</nav>
-
 <!-- HERO -->
 <section class="hero">
-  <div class="badge">🚀 Phase 3 Complete · v0.3.0</div>
-  <h1>The True North for<br/><span>Your Data</span></h1>
-  <p class="tagline">Navigate your data. Make better decisions. Discover your True North.</p>
+  <div class="wordmark">
+    <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:2.4rem;height:2.4rem;vertical-align:middle;margin-right:0.5rem">
+      <circle cx="20" cy="20" r="17" style="stroke:var(--accent)" stroke-width="1.5" fill="none" opacity="0.6"/>
+      <ellipse cx="20" cy="20" rx="8" ry="17" style="stroke:var(--accent)" stroke-width="2" fill="none"/>
+      <ellipse cx="20" cy="20" rx="17" ry="6" style="stroke:var(--accent)" stroke-width="1" fill="none" opacity="0.3"/>
+      <circle cx="20" cy="20" r="2.5" style="fill:var(--gold)"/>
+      <line x1="20" y1="1" x2="20" y2="5" style="stroke:var(--accent)" stroke-width="1.5" stroke-linecap="round" opacity="0.5"/>
+    </svg>MERIDIAN
+  </div>
   <p class="hero-desc">
-    MERIDIAN is an AI-powered data navigation platform that converts natural language
-    business questions into safe, intelligent database queries — no SQL required.
+    Ask business questions in plain English.<br/>Get answers, tables, and charts — no SQL required.
   </p>
   <div class="hero-actions">
     <a class="btn btn-primary" href="#quickstart">Get Started</a>
@@ -392,72 +288,32 @@
   </div>
 </section>
 
-<div class="divider"></div>
-
-<!-- PROBLEM / SOLUTION -->
+<!-- FEATURES -->
 <section id="features">
   <div class="container">
-    <div class="section-label">Why MERIDIAN</div>
-    <h2 class="section-title">Data access, reimagined</h2>
-    <p class="section-sub">Enterprise data is locked behind SQL expertise and rigid dashboards. MERIDIAN breaks down that barrier.</p>
-    <div class="ps-grid">
-      <div class="ps-card">
-        <h3><span class="bad">✕</span> The Problem</h3>
-        <ul>
-          <li><span class="bad">✕</span> Requires SQL expertise to get any answer</li>
-          <li><span class="bad">✕</span> Hours of waiting for BI reports</li>
-          <li><span class="bad">✕</span> High risk of SQL injection and malformed queries</li>
-          <li><span class="bad">✕</span> Limited to pre-built dashboards</li>
-          <li><span class="bad">✕</span> No context-awareness across departments</li>
-        </ul>
-      </div>
-      <div class="ps-card">
-        <h3><span class="good">✓</span> The Solution</h3>
-        <ul>
-          <li><span class="good">✓</span> Ask questions in plain English — no SQL needed</li>
-          <li><span class="good">✓</span> Get answers in seconds, not hours</li>
-          <li><span class="good">✓</span> Query validation prevents errors by default</li>
-          <li><span class="good">✓</span> Ad-hoc queries across any data domain</li>
-          <li><span class="good">✓</span> Domain-aware agents understand Sales, Finance & Ops</li>
-        </ul>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- KEY FEATURES -->
-<section style="padding-top:0;">
-  <div class="container">
+    <div class="section-label">What it does</div>
+    <h2 class="section-title">Built for data, not for DBAs</h2>
+    <p class="section-sub">Ask questions in plain English. Get answers, tables, and charts — instantly.</p>
     <div class="features-grid">
       <div class="feature-card">
         <div class="feature-icon bg1">🤖</div>
         <h3>Multi-Agent Routing</h3>
-        <p>A router agent detects the query domain and dispatches to specialized Sales, Finance, or Operations agents for accurate results.</p>
+        <p>A router agent classifies each query and dispatches it to a specialized Sales, Finance, or Operations agent via LangGraph orchestration.</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon bg2">🔒</div>
+        <div class="feature-icon bg5">🔒</div>
         <h3>Safe by Default</h3>
-        <p>Every query passes through a validator before execution. SQL injection, schema mismatches, and unsafe operations are blocked automatically.</p>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon bg3">⚡</div>
-        <h3>Instant Answers</h3>
-        <p>Backed by GPT-4, LangChain, and LangGraph — your natural language question becomes a safe database query in milliseconds.</p>
+        <p>Every query is validated with SQL syntax pre-checking (SQLite EXPLAIN) before touching the database. Injection and destructive operations are blocked automatically.</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon bg4">📊</div>
-        <h3>Interactive UI</h3>
-        <p>Gradio-powered web interface lets anyone explore data in tabular format without touching a terminal or writing a line of code.</p>
+        <h3>Interactive Charts</h3>
+        <p>Plotly visualizations are auto-selected per result (line, bar, pie) and rendered inline alongside tabular data in the Gradio UI.</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon bg5">🔭</div>
-        <h3>Full Observability</h3>
-        <p>Integrated LangSmith tracing and OpenTelemetry support so you can debug, monitor, and optimize every query in production.</p>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon bg1">🐳</div>
-        <h3>Docker Ready</h3>
-        <p>Single <code>docker-compose up</code> spins up the full stack — API, UI, PostgreSQL — locally or in the cloud.</p>
+        <div class="feature-icon bg3">🔭</div>
+        <h3>Production Observability</h3>
+        <p>Prometheus <code>/metrics</code>, OpenTelemetry traces to Jaeger, Grafana dashboards, LangSmith span tracing, and alert rules — all included.</p>
       </div>
     </div>
   </div>
@@ -467,52 +323,37 @@
 
 <!-- ARCHITECTURE -->
 <section id="architecture" class="arch-section">
-  <div class="container" style="display:grid;grid-template-columns:1fr 1fr;gap:4rem;align-items:center;">
+  <div class="container">
     <div>
       <div class="section-label">How it works</div>
       <h2 class="section-title">Five-step pipeline</h2>
       <p class="section-sub">Every question flows through a deterministic pipeline — routing, specialization, validation, execution, response.</p>
-      <p style="color:var(--muted);font-size:0.9rem;">The architecture is designed for correctness first: agents understand <em>context</em>, validators enforce <em>safety</em>, and the database only ever sees clean, validated queries.</p>
+      <p style="color:var(--muted);font-size:0.88rem;">Agents understand <em>context</em>, validators enforce <em>safety</em>, and the database only ever sees clean queries. Results come back as natural language, tabular data, and auto-selected Plotly charts.</p>
     </div>
     <div class="arch-flow">
       <div class="arch-step">
-        <div class="arch-step-icon bg3">💬</div>
-        <div class="arch-step-text">
-          <strong>User Question</strong>
-          <span>Natural language input from any user</span>
-        </div>
+        <div class="arch-step-icon bg1">💬</div>
+        <div class="arch-step-text"><strong>User Question</strong><span>Natural language input</span></div>
       </div>
       <div class="arch-arrow">↓</div>
       <div class="arch-step">
-        <div class="arch-step-icon bg1">🧭</div>
-        <div class="arch-step-text">
-          <strong>Router Agent</strong>
-          <span>Detects domain: Sales / Finance / Operations</span>
-        </div>
+        <div class="arch-step-icon bg2">🧭</div>
+        <div class="arch-step-text"><strong>Router Agent</strong><span>Detects domain: Sales / Finance / Operations</span></div>
       </div>
       <div class="arch-arrow">↓</div>
       <div class="arch-step">
-        <div class="arch-step-icon bg2">🤖</div>
-        <div class="arch-step-text">
-          <strong>Domain Agent</strong>
-          <span>Handles specialized query construction</span>
-        </div>
+        <div class="arch-step-icon bg4">🤖</div>
+        <div class="arch-step-text"><strong>Domain Agent</strong><span>Constructs SQL via LangGraph</span></div>
       </div>
       <div class="arch-arrow">↓</div>
       <div class="arch-step">
-        <div class="arch-step-icon bg4">🛡️</div>
-        <div class="arch-step-text">
-          <strong>Query Validator</strong>
-          <span>Ensures safety before any DB access</span>
-        </div>
+        <div class="arch-step-icon bg5">🛡️</div>
+        <div class="arch-step-text"><strong>Query Validator</strong><span>Syntax check + injection prevention</span></div>
       </div>
       <div class="arch-arrow">↓</div>
       <div class="arch-step">
-        <div class="arch-step-icon bg5">📊</div>
-        <div class="arch-step-text">
-          <strong>Response</strong>
-          <span>Natural language answer + tabular data</span>
-        </div>
+        <div class="arch-step-icon bg3">📊</div>
+        <div class="arch-step-text"><strong>Response</strong><span>Answer + table + Plotly chart</span></div>
       </div>
     </div>
   </div>
@@ -525,21 +366,17 @@
   <div class="container">
     <div class="section-label">Built with</div>
     <h2 class="section-title">Tech Stack</h2>
-    <p class="section-sub" style="margin-bottom:2rem;">Modern, production-grade tools from foundation to deployment.</p>
-    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;">
+    <p class="section-sub" style="margin-bottom:2rem;">Modern, production-grade tools across every layer.</p>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;">
       <table class="stack-table">
         <thead>
-          <tr>
-            <th>Layer</th>
-            <th>Technology</th>
-            <th>Purpose</th>
-          </tr>
+          <tr><th>Layer</th><th>Technology</th><th>Purpose</th></tr>
         </thead>
         <tbody>
           <tr>
             <td>UI</td>
-            <td><span class="pill">Gradio</span></td>
-            <td style="color:var(--muted);">Interactive web interface</td>
+            <td><span class="pill">Gradio</span> <span class="pill">Plotly</span></td>
+            <td style="color:var(--muted);">Web interface &amp; interactive charts</td>
           </tr>
           <tr>
             <td>API</td>
@@ -549,32 +386,27 @@
           <tr>
             <td>AI / Agents</td>
             <td><span class="pill">LangChain</span> <span class="pill">LangGraph</span></td>
-            <td style="color:var(--muted);">Agent framework & orchestration</td>
+            <td style="color:var(--muted);">Agent orchestration framework</td>
           </tr>
           <tr>
             <td>LLM</td>
-            <td><span class="pill">OpenAI GPT-4</span></td>
-            <td style="color:var(--muted);">Language understanding & generation</td>
+            <td><span class="pill">Groq (Llama 3.3)</span> <span class="pill">OpenAI GPT-4</span></td>
+            <td style="color:var(--muted);">Groq preferred · OpenAI fallback</td>
           </tr>
           <tr>
             <td>Database</td>
             <td><span class="pill">SQLAlchemy</span> <span class="pill">PostgreSQL</span></td>
-            <td style="color:var(--muted);">Robust relational data layer</td>
+            <td style="color:var(--muted);">Relational data layer</td>
+          </tr>
+          <tr>
+            <td>Auth</td>
+            <td><span class="pill">OAuth2 / OIDC</span> <span class="pill">JWT</span></td>
+            <td style="color:var(--muted);">SSO, RBAC &amp; audit logging</td>
           </tr>
           <tr>
             <td>Observability</td>
-            <td><span class="pill">LangSmith</span> <span class="pill">OpenTelemetry</span></td>
-            <td style="color:var(--muted);">Tracing & monitoring</td>
-          </tr>
-          <tr>
-            <td>Testing</td>
-            <td><span class="pill">Pytest</span> <span class="pill">235+ tests</span></td>
-            <td style="color:var(--muted);">Unit, integration & e2e coverage</td>
-          </tr>
-          <tr>
-            <td>Deployment</td>
-            <td><span class="pill">Docker</span> <span class="pill">Docker Compose</span></td>
-            <td style="color:var(--muted);">Containerized, reproducible builds</td>
+            <td><span class="pill">Prometheus</span> <span class="pill">OpenTelemetry</span> <span class="pill">LangSmith</span></td>
+            <td style="color:var(--muted);">Metrics, traces &amp; Grafana dashboards</td>
           </tr>
         </tbody>
       </table>
@@ -584,117 +416,43 @@
 
 <div class="divider"></div>
 
-<!-- ROADMAP -->
-<section id="roadmap" style="background:var(--surface);">
-  <div class="container">
-    <div class="section-label">Development Roadmap</div>
-    <h2 class="section-title">Phase by phase</h2>
-    <p class="section-sub">MERIDIAN is built in deliberate phases — each one shipping real, working functionality.</p>
-    <div class="phases">
-      <div class="phase">
-        <div class="phase-dot-col"><div class="phase-dot done"></div><div class="phase-line"></div></div>
-        <div class="phase-body">
-          <strong>Phase 1: Foundation ✅ Complete</strong>
-          <p>View Registry, Sales/Finance/Operations agents, QueryBuilder, QueryValidator, REST API (6 endpoints), Gradio UI, Docker.</p>
-        </div>
-      </div>
-      <div class="phase">
-        <div class="phase-dot-col"><div class="phase-dot done"></div><div class="phase-line"></div></div>
-        <div class="phase-body">
-          <strong>Phase 2: Activate Scaffolded Features ✅ Complete</strong>
-          <p>Redis caching, pagination, rate limiting, OpenTelemetry tracing, and LangSmith integration — all wired and active.</p>
-        </div>
-      </div>
-      <div class="phase">
-        <div class="phase-dot-col"><div class="phase-dot done"></div><div class="phase-line"></div></div>
-        <div class="phase-body">
-          <strong>Phase 3: LLM-Powered NL Understanding ✅ Complete</strong>
-          <p>GPT-4 domain routing and query interpretation with two-stage regex fallback. Confidence-based clarification. 235+ tests.</p>
-        </div>
-      </div>
-      <div class="phase">
-        <div class="phase-dot-col"><div class="phase-dot planned"></div><div class="phase-line"></div></div>
-        <div class="phase-body">
-          <strong>Phase 4: Conversational Intelligence (Weeks 6–8)</strong>
-          <p>Multi-turn conversations, query history, smart follow-up suggestions, LangGraph as primary orchestrator.</p>
-        </div>
-      </div>
-      <div class="phase">
-        <div class="phase-dot-col"><div class="phase-dot planned"></div><div class="phase-line"></div></div>
-        <div class="phase-body">
-          <strong>Phase 5: Enterprise Security (Weeks 9–12)</strong>
-          <p>JWT auth, row-level access control, audit logging, CORS lockdown.</p>
-        </div>
-      </div>
-      <div class="phase">
-        <div class="phase-dot-col"><div class="phase-dot planned"></div><div class="phase-line"></div></div>
-        <div class="phase-body">
-          <strong>Phase 6: Advanced Query Capabilities (Weeks 13–16)</strong>
-          <p>Window functions, CTEs, subqueries, multi-hop joins, time intelligence, auto-visualization with Plotly.</p>
-        </div>
-      </div>
-      <div class="phase">
-        <div class="phase-dot-col"><div class="phase-dot planned"></div><div class="phase-line"></div></div>
-        <div class="phase-body">
-          <strong>Phase 7: Scale & Polish (Weeks 17–20)</strong>
-          <p>Streaming responses, async execution, self-service domain onboarding, export options, load testing.</p>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<div class="divider"></div>
-
 <!-- QUICK START -->
-<section id="quickstart">
+<section id="quickstart" style="background:var(--bg-light);">
   <div class="container">
     <div class="section-label">Quick Start</div>
     <h2 class="section-title">Up in 5 minutes</h2>
-    <p class="section-sub" style="margin-bottom:2rem;">Clone, configure, and run — locally or in Docker.</p>
+    <p class="section-sub" style="margin-bottom:2rem;">Clone, configure, and run.</p>
     <div class="qs-card">
-      <div class="qs-tabs">
-        <div class="qs-tab active">Local</div>
-        <div class="qs-tab" style="cursor:default;opacity:0.5;">Docker</div>
-      </div>
+      <div class="qs-tab-bar"><div class="qs-tab">Local</div></div>
       <pre><code><span class="comment"># 1. Clone the repo</span>
-<span class="cmd">git clone</span> https://github.com/surpradhan/meridian.git
-<span class="cmd">cd</span> meridian
+<span class="cmd">git clone</span> https://github.com/surpradhan/meridian.git &amp;&amp; <span class="cmd">cd</span> meridian
 
-<span class="comment"># 2. Create virtual environment</span>
-<span class="cmd">python3 -m venv</span> venv
-<span class="cmd">source</span> venv/bin/activate
-
-<span class="comment"># 3. Install dependencies</span>
+<span class="comment"># 2. Install dependencies</span>
+<span class="cmd">python3 -m venv</span> venv &amp;&amp; <span class="cmd">source</span> venv/bin/activate
 <span class="cmd">make</span> install-dev
 
-<span class="comment"># 4. Configure environment</span>
+<span class="comment"># 3. Configure (Groq preferred, OpenAI as fallback)</span>
 <span class="cmd">cp</span> .env.example .env.local
-<span class="cmd">export</span> OPENAI_API_KEY="sk-your-key-here"
+<span class="cmd">export</span> GROQ_API_KEY="gsk-your-key-here"
 
-<span class="comment"># 5. Run tests</span>
-<span class="cmd">make</span> test-unit
-
-<span class="comment"># 6. Launch the UI</span>
-<span class="cmd">make</span> ui     <span class="comment"># → http://localhost:7860</span>
-<span class="comment">#  or the API</span>
-<span class="cmd">make</span> dev    <span class="comment"># → http://localhost:8000/docs</span></code></pre>
+<span class="comment"># 4. Launch</span>
+<span class="cmd">make</span> ui     <span class="comment"># Gradio UI  → http://localhost:7860</span>
+<span class="cmd">make</span> dev    <span class="comment"># REST API   → http://localhost:8000/docs</span></code></pre>
     </div>
   </div>
 </section>
-
-<div class="divider"></div>
 
 <!-- FOOTER -->
 <footer>
   <div class="footer-brand">🧭 MERIDIAN</div>
-  <p>Intelligent Data Navigation Platform &nbsp;·&nbsp; MIT License &nbsp;·&nbsp; v0.2.0</p>
+  <p>Intelligent Data Navigation Platform &nbsp;·&nbsp; MIT License &nbsp;·&nbsp; v0.9.0</p>
   <p style="margin-top:0.5rem;">
     <a href="https://github.com/surpradhan/meridian" target="_blank">GitHub</a> &nbsp;·&nbsp;
     <a href="https://github.com/surpradhan/meridian/blob/main/docs/ARCHITECTURE.md" target="_blank">Architecture</a> &nbsp;·&nbsp;
-    <a href="https://github.com/surpradhan/meridian/blob/main/docs/SETUP.md" target="_blank">Setup Guide</a>
+    <a href="https://github.com/surpradhan/meridian/blob/main/docs/API.md" target="_blank">API Reference</a> &nbsp;·&nbsp;
+    <a href="https://github.com/surpradhan/meridian/blob/main/docs/AUTH.md" target="_blank">Auth Guide</a>
   </p>
-  <p style="margin-top:1rem;font-size:0.78rem;color:#4a5568;">Made with ♥ by the MERIDIAN Team · Navigate your data. Make better decisions.</p>
+  <p style="margin-top:1rem;font-size:0.77rem;color:var(--muted2);">Made with ♥ by the MERIDIAN Team · Navigate your data. Make better decisions.</p>
 </footer>
 
 </body>
