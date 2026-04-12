@@ -66,11 +66,23 @@ SAMPLE_QUERIES = [
 MAX_SUGGESTIONS = 3
 
 
+def _humanize_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Rewrite raw SQL column names to human-friendly titles.
+
+    Examples:
+        COUNT_sale_id  → Count Sale Id
+        SUM_amount     → Sum Amount
+        customer_id    → Customer Id
+    """
+    df.columns = [col.replace("_", " ").title() for col in df.columns]
+    return df
+
+
 def format_result_as_table(result: list) -> pd.DataFrame:
     """Convert a list-of-dicts query result into a DataFrame."""
     if not result:
         return pd.DataFrame({"Info": ["No results found."]})
-    return pd.DataFrame(result)
+    return _humanize_columns(pd.DataFrame(result))
 
 
 # ---------------------------------------------------------------------------
@@ -269,6 +281,22 @@ def export_results_as_excel(raw_rows: Optional[List[Dict[str, Any]]]) -> Optiona
         return None
 
 
+def export_results_as_csv(raw_rows: Optional[List[Dict[str, Any]]]) -> Optional[str]:
+    """Write raw_rows to a temp CSV file and return the path."""
+    if not raw_rows:
+        return None
+    try:
+        df = pd.DataFrame(raw_rows)
+        tmp = tempfile.NamedTemporaryFile(
+            delete=False, suffix=".csv", prefix=_TEMP_PREFIX
+        )
+        df.to_csv(tmp.name, index=False)
+        return tmp.name
+    except Exception as e:
+        logger.error(f"CSV export failed: {e}")
+        return None
+
+
 # ---------------------------------------------------------------------------
 # UI Assets
 # ---------------------------------------------------------------------------
@@ -397,12 +425,13 @@ body, .gradio-container {
 footer { display: none !important; }
 .gr-button { font-family: var(--m-font) !important; }
 
-/* ── Panel / block backgrounds ──────────────────────────── */
-.gr-panel, .gr-box, .gr-form, .gr-block,
-div[class*="block"] {
+/* ── Panel / block backgrounds (Gradio v6: .block class) ── */
+.block {
     background: transparent !important;
     border: none !important;
 }
+/* Keep left-rail and welcome-card backgrounds intact */
+.left-rail .block, .welcome-card .block { background: transparent !important; }
 
 /* ── Top bar ────────────────────────────────────────────── */
 .meridian-topbar {
@@ -450,8 +479,22 @@ div[class*="block"] {
 /* ── Search bar (hero element) ──────────────────────────── */
 .search-row {
     margin-bottom: 8px !important;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    gap: 10px !important;
+    align-items: stretch !important;
 }
-.search-row .gr-textbox,
+/* Strip block/container wrappers that create the card-within-card effect */
+.search-row .block,
+.search-row .input-container {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+}
+/* Style the actual textarea (Gradio v6: .input-container > textarea) */
 .search-row textarea {
     background: var(--m-surface) !important;
     border: 1.5px solid var(--m-border) !important;
@@ -563,12 +606,8 @@ div[class*="block"] {
     font-weight: 600 !important;
 }
 
-/* ── Accordion ──────────────────────────────────────────── */
-.gr-accordion {
-    border: none !important;
-    background: transparent !important;
-}
-.gr-accordion > .label-wrap {
+/* ── Accordion (Gradio v6: button.label-wrap) ────────────── */
+button.label-wrap {
     color: var(--m-text-3) !important;
     font-size: 0.78em !important;
     font-weight: 600 !important;
@@ -576,18 +615,37 @@ div[class*="block"] {
     text-transform: uppercase !important;
     padding: 8px 4px !important;
     border-bottom: 1px solid var(--m-border) !important;
+    width: 100% !important;
+    background: transparent !important;
+    border-top: none !important;
+    border-left: none !important;
+    border-right: none !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    cursor: pointer !important;
+}
+/* Arrow: Gradio rotates ▼ by -90deg (→ ◄) when closed.
+   Override to rotate -90deg (→ ►) for standard "click to expand" convention. */
+button.label-wrap:not(.open) .icon {
+    transform: rotate(-90deg) !important;
+    display: inline-block !important;
+    transition: transform var(--m-transition) !important;
+}
+button.label-wrap.open .icon {
+    transform: rotate(0deg) !important;
+    display: inline-block !important;
+    transition: transform var(--m-transition) !important;
 }
 
-/* ── Checkboxes ─────────────────────────────────────────── */
-.gr-checkbox label {
-    color: var(--m-text-2) !important;
-    font-size: 0.85em !important;
-}
-.gr-checkbox input[type="checkbox"] {
+/* ── Checkboxes (Gradio v6) ─────────────────────────────── */
+input[type="checkbox"] {
     accent-color: var(--m-teal) !important;
 }
-.gr-checkbox .gr-check {
-    border-color: var(--m-border) !important;
+.block label span {
+    color: var(--m-text-2) !important;
+    font-size: 0.85em !important;
+    font-family: var(--m-font) !important;
 }
 
 /* ── Main stage ─────────────────────────────────────────── */
@@ -728,20 +786,30 @@ div[class*="block"] {
     box-shadow: 0 4px 12px rgba(13,148,136,0.15) !important;
 }
 
-/* ── Results table ──────────────────────────────────────── */
-.dataframe {
+/* ── Results table (Gradio v6: .table-container) ────────── */
+.table-container {
     border-radius: var(--m-radius-lg) !important;
     overflow: hidden !important;
     border: 1px solid var(--m-border) !important;
 }
-.dataframe table {
+.table-container table {
     border-collapse: separate !important;
     border-spacing: 0 !important;
     width: 100% !important;
+    table-layout: auto !important;
 }
-.dataframe thead th {
+/* Prevent any single column from dominating */
+.table-container thead th,
+.table-container tbody td {
+    min-width: 80px !important;
+    max-width: 260px !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+}
+.table-container thead th {
     background: var(--m-surface) !important;
     color: var(--m-text-2) !important;
+    font-family: var(--m-font) !important;
     font-weight: 600 !important;
     font-size: 0.78em !important;
     text-transform: uppercase !important;
@@ -753,32 +821,32 @@ div[class*="block"] {
     top: 0;
     z-index: 1;
 }
-.dataframe tbody td {
+.table-container tbody td {
     padding: 10px 16px !important;
     font-size: 0.88em !important;
+    font-family: var(--m-font) !important;
     color: var(--m-text) !important;
     border-bottom: 1px solid rgba(51,65,85,0.5) !important;
     background: var(--m-navy) !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
 }
-.dataframe tbody tr:nth-child(even) td {
+.table-container tbody tr:nth-child(even) td {
     background: var(--m-navy-light) !important;
 }
-.dataframe tbody tr:hover td {
+.table-container tbody tr:hover td {
     background: var(--m-teal-glow) !important;
     transition: background var(--m-transition) !important;
 }
 
-/* ── Tabs ───────────────────────────────────────────────── */
-.gr-tabs {
-    border: none !important;
-    background: transparent !important;
-}
-.gr-tab-nav {
+/* ── Tabs (Gradio v6: [role="tablist"] / [role="tab"]) ──── */
+[role="tablist"] {
     border-bottom: 1px solid var(--m-border) !important;
     background: transparent !important;
     gap: 0 !important;
 }
-.gr-tab-nav button {
+[role="tab"] {
     background: transparent !important;
     color: var(--m-text-3) !important;
     border: none !important;
@@ -788,29 +856,56 @@ div[class*="block"] {
     font-weight: 500 !important;
     letter-spacing: 0.02em !important;
     transition: all var(--m-transition) !important;
+    cursor: pointer !important;
 }
-.gr-tab-nav button:hover {
+[role="tab"]:hover {
     color: var(--m-text) !important;
 }
-.gr-tab-nav button.selected {
+[role="tab"][aria-selected="true"] {
     color: var(--m-teal) !important;
     border-bottom-color: var(--m-teal) !important;
     font-weight: 600 !important;
 }
 
 /* ── Suggestion chips ───────────────────────────────────── */
-.suggestions-row .gr-button,
-.suggestions-row button {
+/* In Gradio v6, elem_classes on gr.Group doesn't propagate to the wrapper div,
+   so we target the group containing the suggestions-label using :has() */
+.gr-group:has(.suggestions-label) {
+    background: transparent !important;
+    border: 1px solid var(--m-border) !important;
+    border-radius: var(--m-radius) !important;
+    padding: 8px 14px !important;
+}
+/* Make the inner Row flex-wrap instead of equal-width columns */
+.gr-group:has(.suggestions-label) .row {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+    align-items: center !important;
+}
+/* Strip equal-height forcing on the row */
+.gr-group:has(.suggestions-label) .row.unequal-height {
+    flex: none !important;
+}
+/* Style each chip as a pill */
+.gr-group:has(.suggestions-label) button {
     background: var(--m-surface) !important;
     color: var(--m-text-2) !important;
     border: 1px solid var(--m-border) !important;
     border-radius: 999px !important;
     font-size: 0.8em !important;
-    padding: 6px 16px !important;
+    padding: 5px 14px !important;
     transition: all var(--m-transition) !important;
+    flex: 0 1 auto !important;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: 380px !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    min-height: 30px !important;
 }
-.suggestions-row .gr-button:hover,
-.suggestions-row button:hover {
+.gr-group:has(.suggestions-label) button:hover {
     border-color: var(--m-teal) !important;
     color: var(--m-teal) !important;
     background: var(--m-teal-glow) !important;
@@ -819,68 +914,71 @@ div[class*="block"] {
     font-size: 0.75em !important;
     font-weight: 600 !important;
     color: var(--m-text-3) !important;
-    margin: 4px 0 2px !important;
+    margin: 0 6px 0 0 !important;
+    white-space: nowrap !important;
 }
 
 /* ── Export toolbar ──────────────────────────────────────── */
 .export-row {
+    display: flex !important;
     flex-wrap: wrap !important;
-    gap: 8px 12px !important;
-    align-items: flex-start !important;
+    gap: 8px !important;
+    align-items: center !important;
     padding-top: 10px !important;
     border-top: 1px solid var(--m-border) !important;
     margin-top: 4px !important;
 }
-.export-row > div {
-    flex-shrink: 0 !important;
-    min-width: 0 !important;
-}
+/* All three export buttons identical ghost style */
 .export-row .gr-button,
 .export-row button {
     background: transparent !important;
     color: var(--m-text-3) !important;
     border: 1px solid var(--m-border) !important;
     border-radius: 8px !important;
-    font-size: 0.78em !important;
-    padding: 6px 14px !important;
+    font-size: 0.80em !important;
+    font-weight: 500 !important;
+    padding: 6px 16px !important;
     transition: all var(--m-transition) !important;
     white-space: nowrap !important;
+    min-height: 34px !important;
+    flex: 0 0 auto !important;
 }
 .export-row .gr-button:hover,
 .export-row button:hover {
-    color: var(--m-text-2) !important;
-    border-color: var(--m-border-light) !important;
-    background: var(--m-surface) !important;
+    color: var(--m-teal) !important;
+    border-color: var(--m-teal) !important;
+    background: var(--m-teal-glow) !important;
 }
-/* File chips in export row */
+/* File download chip — rendered as a small subtle chip below buttons */
+.export-row .gr-file,
 .export-row .file-preview {
     background: var(--m-surface) !important;
     border: 1px solid var(--m-border) !important;
     border-radius: 8px !important;
     padding: 4px 10px !important;
     font-size: 0.78em !important;
+    font-family: var(--m-font) !important;
     color: var(--m-text-2) !important;
     white-space: nowrap !important;
     overflow: hidden !important;
     text-overflow: ellipsis !important;
-    max-width: 200px !important;
-}
-@media (max-width: 1280px) {
-    .export-row .file-preview { max-width: 160px !important; }
+    max-width: 220px !important;
+    flex: 0 0 auto !important;
 }
 
-/* ── File download ──────────────────────────────────────── */
-.gr-file {
+/* ── File download (Gradio v6) ──────────────────────────── */
+.file-preview-holder,
+.file-preview {
     background: var(--m-surface) !important;
     border: 1px dashed var(--m-border) !important;
     border-radius: var(--m-radius) !important;
-}
-.gr-file .file-name {
     color: var(--m-text) !important;
+    font-family: var(--m-font) !important;
 }
 
-/* ── JSON display ───────────────────────────────────────── */
-.gr-json {
+/* ── JSON display (Gradio v6) ───────────────────────────── */
+.json-holder,
+.json-component {
     background: var(--m-navy) !important;
     border: 1px solid var(--m-border) !important;
     border-radius: var(--m-radius) !important;
@@ -888,31 +986,43 @@ div[class*="block"] {
     font-family: var(--m-font-mono) !important;
 }
 
-/* ── Plot area ──────────────────────────────────────────── */
-.gr-plot {
+/* ── Plot area (Gradio v6) ──────────────────────────────── */
+.plot-container,
+.plot-component {
     background: var(--m-surface) !important;
     border: 1px solid var(--m-border) !important;
     border-radius: var(--m-radius-lg) !important;
     overflow: hidden !important;
 }
 
-/* ── History panel ──────────────────────────────────────── */
-.history-table .dataframe thead th {
-    background: transparent !important;
-    font-size: 0.72em !important;
-    padding: 6px 8px !important;
-    border-bottom: 1px solid var(--m-border) !important;
-}
-.history-table .dataframe tbody td {
-    padding: 7px 8px !important;
+/* ── History panel (Gradio v6: no .dataframe wrapper) ────── */
+/* Hide the "Recent Queries" column header — redundant inside "Recent" accordion */
+.history-table thead { display: none !important; }
+.history-table td {
+    padding: 7px 10px !important;
     font-size: 0.82em !important;
+    font-family: var(--m-font) !important;
+    font-weight: 400 !important;
     color: var(--m-text-3) !important;
     background: transparent !important;
+    border-radius: 6px !important;
+    white-space: normal !important;
     cursor: pointer;
+    line-height: 1.4 !important;
+    max-width: 100% !important;
+    /* Override table-container min/max for compact history display */
+    min-width: 0 !important;
+    max-width: none !important;
 }
-.history-table .dataframe tbody tr:hover td {
+.history-table tr:hover td {
     color: var(--m-text) !important;
     background: var(--m-teal-glow) !important;
+}
+/* Override table-container border for history */
+.history-table .table-container {
+    border: none !important;
+    border-radius: 0 !important;
+    background: transparent !important;
 }
 
 /* ── Scrollbar ──────────────────────────────────────────── */
@@ -988,9 +1098,6 @@ def build_ui() -> gr.Blocks:
 
     with gr.Blocks(
         title="MERIDIAN \u2014 Intelligent Data Navigation",
-        theme=theme,
-        css=MERIDIAN_CSS,
-        js=KEYBOARD_JS,
     ) as app:
 
         # ── Top bar ─────────────────────────────────────────────────
@@ -1075,8 +1182,14 @@ def build_ui() -> gr.Blocks:
                 with gr.Group(visible=True, elem_classes=["welcome-card"]) as welcome_group:
                     gr.HTML(value=EMPTY_STATE_HTML)
                     gr.HTML('<p class="quickstart-label">Try an example:</p>')
+                    # 2×2 grid so text doesn't wrap across 4 columns
+                    sample_btns = []
                     with gr.Row():
-                        sample_btns = [gr.Button(q, size="sm") for q in SAMPLE_QUERIES]
+                        sample_btns.append(gr.Button(SAMPLE_QUERIES[0], size="sm"))
+                        sample_btns.append(gr.Button(SAMPLE_QUERIES[1], size="sm"))
+                    with gr.Row():
+                        sample_btns.append(gr.Button(SAMPLE_QUERIES[2], size="sm"))
+                        sample_btns.append(gr.Button(SAMPLE_QUERIES[3], size="sm"))
 
                 # Results area with tabs
                 with gr.Tabs(visible=False) as results_tabs:
@@ -1091,13 +1204,14 @@ def build_ui() -> gr.Blocks:
                     with gr.TabItem("Explain"):
                         explain_panel = gr.JSON(label="")
 
-                # Export toolbar
+                # Export toolbar — three identical ghost buttons + hidden file widgets
                 with gr.Row(elem_classes=["export-row"]):
-                    export_json_btn = gr.Button("Export JSON", size="sm", visible=False)
-                    export_excel_btn = gr.Button("Export Excel", size="sm", visible=False)
-                    download_file = gr.File(label="CSV", visible=False)
-                    download_json = gr.File(label="JSON", visible=False)
-                    download_excel = gr.File(label="Excel", visible=False)
+                    export_csv_btn = gr.Button("↓ Export CSV", size="sm", visible=False)
+                    export_json_btn = gr.Button("↓ Export JSON", size="sm", visible=False)
+                    export_excel_btn = gr.Button("↓ Export Excel", size="sm", visible=False)
+                    download_file = gr.File(label="", visible=False)
+                    download_json = gr.File(label="", visible=False)
+                    download_excel = gr.File(label="", visible=False)
 
         # ── Persistent state ────────────────────────────────────────
         history_state = gr.State([])
@@ -1130,6 +1244,7 @@ def build_ui() -> gr.Blocks:
                     gr.update(),                                         # sugg_btn_0
                     gr.update(),                                         # sugg_btn_1
                     gr.update(),                                         # sugg_btn_2
+                    gr.update(),                                         # export_csv_btn
                     gr.update(),                                         # export_json_btn
                     gr.update(),                                         # export_excel_btn
                     gr.update(value="Ask", interactive=True),            # submit_btn
@@ -1140,7 +1255,7 @@ def build_ui() -> gr.Blocks:
                     gr.update(),                                         # raw_rows_state
                     gr.update(),                                         # results_tabs
                 )
-            df, error_html, meta_html, csv_path, sugg_list, new_conv_id, explain_data, viz = process_query(
+            df, error_html, meta_html, _csv_path_unused, sugg_list, new_conv_id, explain_data, viz = process_query(
                 question_val, domain_val, show_sql_val,
                 show_explain=show_explain_val, conversation_id=conv_id,
             )
@@ -1183,7 +1298,7 @@ def build_ui() -> gr.Blocks:
                 error_html,                                             # error_box
                 gr.update(visible=False),                               # welcome_group
                 meta_html,                                              # metadata
-                gr.update(value=csv_path, visible=bool(csv_path)),     # download_file
+                gr.update(value=None, visible=False),                  # download_file (populated on-demand)
                 gr.update(value=None, visible=False),                  # download_json
                 gr.update(value=None, visible=False),                  # download_excel
                 gr.update(value=explain_data if explain_data else None,
@@ -1192,8 +1307,9 @@ def build_ui() -> gr.Blocks:
                 gr.update(value=s0, visible=bool(s0)),                 # sugg_btn_0
                 gr.update(value=s1, visible=bool(s1)),                 # sugg_btn_1
                 gr.update(value=s2, visible=bool(s2)),                 # sugg_btn_2
-                gr.update(visible=bool(raw_rows)),                     # export_json_btn
-                gr.update(visible=bool(raw_rows)),                     # export_excel_btn
+                gr.update(visible=has_results),                        # export_csv_btn
+                gr.update(visible=has_results),                        # export_json_btn
+                gr.update(visible=has_results),                        # export_excel_btn
                 gr.update(value="Ask", interactive=True),              # submit_btn
                 new_history,                                            # history_state
                 build_history_data(new_history),                       # history_display
@@ -1218,6 +1334,7 @@ def build_ui() -> gr.Blocks:
                 gr.update(value="", visible=False),                 # sugg_btn_0
                 gr.update(value="", visible=False),                 # sugg_btn_1
                 gr.update(value="", visible=False),                 # sugg_btn_2
+                gr.update(visible=False),                           # export_csv_btn
                 gr.update(visible=False),                           # export_json_btn
                 gr.update(visible=False),                           # export_excel_btn
                 gr.update(value=""),                                # question
@@ -1227,6 +1344,10 @@ def build_ui() -> gr.Blocks:
                 [],                                                 # raw_rows_state
                 gr.update(visible=False),                           # results_tabs
             )
+
+        def do_export_csv(raw_rows):
+            path = export_results_as_csv(raw_rows)
+            return gr.update(value=path, visible=bool(path))
 
         def do_export_json(raw_rows):
             path = export_results_as_json(raw_rows)
@@ -1242,7 +1363,7 @@ def build_ui() -> gr.Blocks:
             results_table, results_plot, error_box, welcome_group, metadata,
             download_file, download_json, download_excel, explain_panel,
             suggestions_group, sugg_btn_0, sugg_btn_1, sugg_btn_2,
-            export_json_btn, export_excel_btn,
+            export_csv_btn, export_json_btn, export_excel_btn,
         ]
         QUERY_OUTPUTS = CORE_OUTPUTS + [
             submit_btn, history_state, history_display,
@@ -1292,6 +1413,11 @@ def build_ui() -> gr.Blocks:
             )
 
         # ── Export buttons ──────────────────────────────────────────
+        export_csv_btn.click(
+            fn=do_export_csv,
+            inputs=[raw_rows_state],
+            outputs=[download_file],
+        )
         export_json_btn.click(
             fn=do_export_json,
             inputs=[raw_rows_state],
@@ -1325,8 +1451,19 @@ def build_ui() -> gr.Blocks:
 
 
 if __name__ == "__main__":
+    import os as _os
     app = build_ui()
+    _port = int(_os.environ.get("GRADIO_SERVER_PORT", 7860))
     app.launch(
         server_name="0.0.0.0",
-        server_port=7860,
+        server_port=_port,
+        theme=gr.themes.Base(
+            primary_hue=gr.themes.colors.teal,
+            secondary_hue=gr.themes.colors.slate,
+            neutral_hue=gr.themes.colors.slate,
+            font=[gr.themes.GoogleFont("Inter"), "system-ui", "sans-serif"],
+            font_mono=[gr.themes.GoogleFont("JetBrains Mono"), "monospace"],
+        ),
+        css=MERIDIAN_CSS,
+        js=KEYBOARD_JS,
     )
