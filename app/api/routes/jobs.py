@@ -10,6 +10,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from app.api.authz import mask_result
 from app.auth.dependencies import get_current_user, require_role
 from app.auth.store import User
 from app.jobs.store import JobStatus, get_job_store
@@ -65,6 +66,7 @@ async def submit_async_query(
         request.question,
         request.conversation_id,
         request.domain,
+        user_id=current_user.id,
     )
 
     logger.info(f"Async job {job_id} submitted by {current_user.username}")
@@ -75,6 +77,11 @@ async def submit_async_query(
     )
 
 
+def _owns_job(record: Any, user: User) -> bool:
+    """A user may access a job they submitted; admins may access any job."""
+    return user.role == "admin" or record.user_id == user.id
+
+
 @router.get("/api/jobs/{job_id}")
 async def get_job_status(
     job_id: str,
@@ -83,9 +90,16 @@ async def get_job_status(
     """Poll the status and result of a background job."""
     store = get_job_store()
     record = store.get(job_id)
-    if record is None:
+    # Return the same 404 for missing and unauthorized jobs so existence of
+    # another user's job isn't disclosed.
+    if record is None or not _owns_job(record, current_user):
         raise HTTPException(status_code=404, detail=f"Job {job_id!r} not found")
-    return record.to_dict()
+    payload = record.to_dict()
+    # The stored result is the orchestrator dict (with its own "result" rows
+    # key); mask sensitive fields for the requesting user's role.
+    if isinstance(payload.get("result"), dict):
+        payload["result"] = mask_result(payload["result"], current_user)
+    return payload
 
 
 @router.delete("/api/jobs/{job_id}")
@@ -95,8 +109,12 @@ async def cancel_job(
 ) -> Dict[str, Any]:
     """Cancel a pending job or remove a completed one."""
     store = get_job_store()
+    record = store.get(job_id)
+    if record is None or not _owns_job(record, current_user):
+        raise HTTPException(status_code=404, detail=f"Job {job_id!r} not found")
     removed = store.cancel(job_id)
     if not removed:
+        # Re-fetch: cancel() returns False for running jobs (can't be cancelled).
         record = store.get(job_id)
         if record is None:
             raise HTTPException(status_code=404, detail=f"Job {job_id!r} not found")

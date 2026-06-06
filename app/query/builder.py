@@ -13,7 +13,12 @@ This module is responsible for:
 
 import logging
 from typing import List, Set, Dict, Any, Optional, Tuple, Union
-from app.views.models import QueryRequest, WindowFunction
+from app.views.models import (
+    QueryRequest,
+    WindowFunction,
+    _IDENTIFIER_RE,
+    _VALID_AGGREGATIONS,
+)
 from app.views.registry import ViewRegistry
 
 logger = logging.getLogger(__name__)
@@ -332,11 +337,27 @@ class QueryBuilder:
         Returns:
             Table-qualified column name (e.g., "customer_dim.region")
         """
+        if not isinstance(column, str):
+            raise ValueError(
+                f"Column identifier must be a string, got {type(column).__name__}"
+            )
         for view_name in views:
             view = self.registry.get_view(view_name)
-            if view and any(col.name.lower() == column.lower() for col in view.columns):
-                return f"{view_name}.{column}"
-        return column
+            if view:
+                for col in view.columns:
+                    if col.name.lower() == column.lower():
+                        # Emit the canonical column name from the schema rather than
+                        # the caller-supplied string.
+                        return f"{view_name}.{col.name}"
+        # Not a known base-view column. Permit only safe bare identifiers
+        # (e.g. CTE-derived columns or aggregate aliases); reject anything
+        # carrying SQL syntax so injected payloads can't reach the query.
+        if _IDENTIFIER_RE.match(column):
+            return column
+        raise ValueError(
+            f"Unrecognized column identifier {column!r}: not found in any selected "
+            "view and not a valid bare identifier."
+        )
 
     def _build_where_clause(self, request: QueryRequest) -> Optional[str]:
         """
@@ -491,6 +512,11 @@ class QueryBuilder:
                     "Expected '<AGG>_<column>' (e.g. 'SUM_amount')."
                 )
             agg_func, column = key_parts[0].upper(), key_parts[1]
+            if agg_func not in _VALID_AGGREGATIONS:
+                raise ValueError(
+                    f"HAVING key '{alias_key}' uses an invalid aggregation '{agg_func}'. "
+                    f"Permitted: {', '.join(sorted(_VALID_AGGREGATIONS))}"
+                )
             qualified_col = self._resolve_column_table(column, request.selected_views)
 
             op = condition.get("op", ">")

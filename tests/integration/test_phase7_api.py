@@ -121,6 +121,68 @@ class TestAsyncJobAPI:
         assert isinstance(resp.json()["jobs"], list)
 
 
+class TestJobOwnershipAndMasking:
+    """Jobs must be isolated per-user and results masked by role."""
+
+    @pytest.fixture
+    def env(self):
+        from app.api.routes.jobs import router
+        from app.auth.dependencies import get_current_user
+        from app.jobs.store import JobStore
+
+        store = JobStore(max_workers=2)
+        cls = _orch_cls()  # mock result is routed to the "sales" domain
+
+        # Switchable current user so we can submit as A and poll as B.
+        holder = {"user": _make_user(role="analyst")}
+
+        mini_app = FastAPI()
+        mini_app.include_router(router)
+        mini_app.dependency_overrides[get_current_user] = lambda: holder["user"]
+
+        with patch("app.api.routes.jobs.get_job_store", return_value=store), \
+             patch("app.agents.orchestrator.Orchestrator", cls), \
+             patch("app.views.registry.get_registry", return_value=MagicMock()), \
+             patch("app.database.connection.get_db", return_value=MagicMock()):
+            yield TestClient(mini_app), holder
+
+    def _submit_and_wait(self, client):
+        job_id = client.post("/api/query/execute-async", json={"question": "q"}).json()["job_id"]
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            poll = client.get(f"/api/jobs/{job_id}")
+            if poll.status_code == 200 and poll.json()["status"] in ("complete", "failed"):
+                break
+            time.sleep(0.05)
+        return job_id
+
+    def test_other_user_cannot_read_job(self, env):
+        client, holder = env
+        holder["user"] = _make_user(role="analyst")
+        holder["user"].id = "user-a"
+        job_id = self._submit_and_wait(client)
+
+        # Switch to a different (non-admin) user — should get 404, not the result.
+        other = _make_user(role="analyst")
+        other.id = "user-b"
+        holder["user"] = other
+        assert client.get(f"/api/jobs/{job_id}").status_code == 404
+        assert client.delete(f"/api/jobs/{job_id}").status_code == 404
+
+    def test_admin_can_read_any_job(self, env):
+        client, holder = env
+        owner = _make_user(role="analyst")
+        owner.id = "user-a"
+        holder["user"] = owner
+        job_id = self._submit_and_wait(client)
+
+        admin = _make_user(role="admin")
+        admin.id = "user-admin"
+        holder["user"] = admin
+        assert client.get(f"/api/jobs/{job_id}").status_code == 200
+
+
+
 # ---------------------------------------------------------------------------
 # 7.3 Admin Domain Onboarding API
 # ---------------------------------------------------------------------------
@@ -224,6 +286,26 @@ class TestExportAPI:
     def test_export_custom_filename(self, client):
         resp = client.post("/api/query/export", json={"question": "q", "format": "csv", "filename": "my_report"})
         assert "my_report.csv" in resp.headers["content-disposition"]
+
+    def test_export_denies_domain_user_cannot_access(self):
+        """An analyst scoped to 'finance' cannot export a 'sales'-routed result."""
+        from app.api.routes.export import router
+        from app.auth.dependencies import get_current_user
+
+        # User allowed only into 'finance'; mock result routes to 'sales'.
+        user = _make_user(role="analyst", domains=["finance"])
+        cls = _orch_cls()  # _MOCK_RESULT["domain"] == "sales"
+
+        mini_app = FastAPI()
+        mini_app.include_router(router)
+        mini_app.dependency_overrides[get_current_user] = lambda: user
+
+        with patch("app.agents.orchestrator.Orchestrator", cls), \
+             patch("app.views.registry.get_registry", return_value=MagicMock()), \
+             patch("app.database.connection.get_db", return_value=MagicMock()):
+            client = TestClient(mini_app)
+            resp = client.post("/api/query/export", json={"question": "Total sales", "format": "json"})
+        assert resp.status_code == 403
 
 
 # ---------------------------------------------------------------------------

@@ -34,6 +34,7 @@ class JobRecord:
     job_id: str
     status: JobStatus
     created_at: datetime
+    user_id: Optional[str] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     result: Optional[Dict[str, Any]] = None
@@ -65,17 +66,33 @@ class JobStore:
         self._lock = threading.Lock()
         self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="meridian-job")
 
-    def submit(self, fn: Callable, *args: Any, **kwargs: Any) -> str:
+    def submit(
+        self,
+        fn: Callable,
+        *args: Any,
+        user_id: Optional[str] = None,
+        **kwargs: Any,
+    ) -> str:
         """Submit a callable to run asynchronously.
+
+        Args:
+            fn: callable to execute in the background
+            user_id: owner of the job, used to enforce per-user access on poll/cancel
+            *args, **kwargs: forwarded to ``fn``
 
         Returns:
             job_id — unique identifier for polling
         """
+        # Opportunistically sweep expired jobs so the store doesn't grow
+        # unbounded (there is no separate scheduler).
+        self.cleanup_old_jobs()
+
         job_id = str(uuid.uuid4())
         record = JobRecord(
             job_id=job_id,
             status=JobStatus.PENDING,
             created_at=datetime.now(timezone.utc),
+            user_id=user_id,
         )
 
         with self._lock:

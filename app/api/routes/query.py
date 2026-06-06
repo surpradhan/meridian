@@ -236,7 +236,7 @@ async def execute_query(
         raise
     except Exception as e:
         logger.error(f"Query execution failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Query execution failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Query execution failed")
 
 
 @router.post("/validate")
@@ -257,6 +257,14 @@ async def validate_query(
     """
     logger.info(f"Validating query: {request.question}")
 
+    # Validation runs the full agent pipeline (including a DB query), so it must
+    # be gated like execution — otherwise a viewer can run arbitrary queries here.
+    if not current_user.can_execute_queries():
+        raise HTTPException(
+            status_code=403,
+            detail="Your role does not permit query execution. Contact an admin.",
+        )
+
     try:
         from app.views.registry import get_registry
         from app.database.connection import get_db
@@ -273,6 +281,13 @@ async def validate_query(
             domain = request.domain
             confidence = 1.0
 
+        # Enforce domain access before running the pipeline against it.
+        if domain and not current_user.can_access_domain(domain):
+            raise HTTPException(
+                status_code=403,
+                detail=f"Access to domain '{domain}' is not permitted for your account",
+            )
+
         # Validate
         is_valid, errors = orchestrator.validate_query_for_domain(domain, request.question)
 
@@ -283,9 +298,11 @@ async def validate_query(
             "errors": errors,
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Validation failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Validation failed: {str(e)}")
+        logger.error(f"Validation failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Query validation failed")
 
 
 @router.get("/domains")

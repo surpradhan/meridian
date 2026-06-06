@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from app.api.authz import mask_result
 from app.auth.dependencies import get_current_user
 from app.auth.store import User
 from app.agents.streaming import MeridianStreamingCallback
@@ -45,6 +46,7 @@ async def _stream_query(
     domain: Optional[str],
     conversation_id: Optional[str],
     callback: MeridianStreamingCallback,
+    user: User,
 ) -> AsyncGenerator[str, None]:
     """
     Async generator that:
@@ -94,9 +96,23 @@ async def _stream_query(
 
     # Send final result or error
     if error_holder:
-        yield _sse_event({"type": "error", "message": error_holder["error"]})
+        # Don't leak internal exception text to the client.
+        yield _sse_event({"type": "error", "message": "Query execution failed"})
     elif result_holder:
-        yield _sse_event({"type": "result", "data": result_holder["data"]})
+        data = result_holder["data"]
+        # Enforce domain access on the routed result. We can't raise an HTTP 403
+        # mid-stream (headers are already sent), so a denied domain becomes an
+        # error event instead.
+        routed_domain = data.get("domain", "") if isinstance(data, dict) else ""
+        if routed_domain and not user.can_access_domain(routed_domain):
+            yield _sse_event(
+                {
+                    "type": "error",
+                    "message": f"Access to domain '{routed_domain}' is not permitted for your account",
+                }
+            )
+        else:
+            yield _sse_event({"type": "result", "data": mask_result(data, user)})
 
     # SSE close event
     yield _sse_event({"type": "done"})
@@ -121,6 +137,29 @@ async def stream_query(
     if not current_user.can_execute_queries():
         raise HTTPException(status_code=403, detail="Your role does not permit query execution.")
 
+    # Resolve the routed (or forced) domain up-front so we can reject a denied
+    # user before any LLM tokens stream, rather than only blocking the final
+    # result event.
+    try:
+        from app.agents.orchestrator import get_shared_or_new_orchestrator
+
+        orchestrator = get_shared_or_new_orchestrator()
+        if request.domain:
+            routed_domain = request.domain
+        else:
+            routed_domain, _ = orchestrator.router.route(request.question)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Stream routing failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Query execution failed")
+
+    if routed_domain and not current_user.can_access_domain(routed_domain):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Access to domain '{routed_domain}' is not permitted for your account",
+        )
+
     callback = MeridianStreamingCallback()
 
     return StreamingResponse(
@@ -129,6 +168,7 @@ async def stream_query(
             domain=request.domain,
             conversation_id=request.conversation_id,
             callback=callback,
+            user=current_user,
         ),
         media_type="text/event-stream",
         headers={
