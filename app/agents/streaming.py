@@ -15,6 +15,12 @@ logger = logging.getLogger(__name__)
 
 _SENTINEL = object()  # signals end-of-stream
 
+# How long a single blocking queue.get() may occupy an executor thread before
+# it is released back to the pool. Bounding this prevents concurrent SSE streams
+# from each pinning a default-executor thread for the full duration of an LLM
+# call, which would otherwise starve every other run_in_executor user.
+_POLL_TIMEOUT_SECONDS = 0.5
+
 
 class MeridianStreamingCallback:
     """
@@ -69,11 +75,26 @@ class MeridianStreamingCallback:
             yield token
 
     async def aiter_tokens(self) -> AsyncGenerator[str, None]:
-        """Async generator — yields tokens without blocking the event loop."""
+        """Async generator — yields tokens without blocking the event loop.
+
+        Each poll occupies an executor thread for at most ``_POLL_TIMEOUT_SECONDS``
+        (rather than the full duration of the LLM call), so many concurrent
+        streams don't exhaust the shared default executor. Termination is driven
+        by the end-of-stream sentinel, with a drained+done fallback so the
+        generator can't hang if the sentinel is ever missed.
+        """
         loop = asyncio.get_running_loop()
         while True:
-            # Poll the sync queue in the thread pool to avoid blocking
-            token = await loop.run_in_executor(None, self._queue.get)
+            try:
+                token = await loop.run_in_executor(
+                    None, self._queue.get, True, _POLL_TIMEOUT_SECONDS
+                )
+            except queue.Empty:
+                # No token within the poll window. Stop if the producer is done
+                # and nothing remains; otherwise release the thread and re-poll.
+                if self._done.is_set() and self._queue.empty():
+                    break
+                continue
             if token is _SENTINEL:
                 break
             yield token

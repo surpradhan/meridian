@@ -94,6 +94,7 @@ def invoke_llm_with_retry(llm, prompt: str):
 
 _client: Optional[object] = None
 _init_attempted: bool = False
+_init_lock = threading.Lock()
 
 
 def get_llm() -> Optional[object]:
@@ -112,7 +113,18 @@ def get_llm() -> Optional[object]:
     if _init_attempted:
         return _client
 
-    _init_attempted = True
+    # Double-checked locking so concurrent first callers construct exactly one
+    # shared client (the whole point of the singleton's connection-pool reuse).
+    with _init_lock:
+        if _init_attempted:
+            return _client
+        _init_attempted = True
+        return _initialize_client()
+
+
+def _initialize_client() -> Optional[object]:
+    """Construct the provider client. Caller must hold ``_init_lock``."""
+    global _client
     try:
         from app.config import settings
 

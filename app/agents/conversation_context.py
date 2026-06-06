@@ -63,6 +63,11 @@ class ConversationContext:
         self.created_at = datetime.utcnow()
         self.last_accessed = datetime.utcnow()
 
+        # Guards self.messages and self.context against concurrent turns on the
+        # same conversation_id (e.g. a double-submit). Reentrant so methods like
+        # to_dict() can call other guarded methods without self-deadlock.
+        self._lock = threading.RLock()
+
         # Context variables for reference in follow-up queries
         self.context = {
             "last_domain": None,
@@ -90,12 +95,13 @@ class ConversationContext:
             Added message
         """
         message = ConversationMessage(role, content, query_result)
-        self.messages.append(message)
-        self.last_accessed = datetime.utcnow()
+        with self._lock:
+            self.messages.append(message)
+            self.last_accessed = datetime.utcnow()
 
-        # Trim history if needed
-        if len(self.messages) > self.max_history:
-            self.messages = self.messages[-self.max_history:]
+            # Trim history if needed
+            if len(self.messages) > self.max_history:
+                self.messages = self.messages[-self.max_history:]
 
         logger.debug(
             f"Added {role} message to conversation {self.conversation_id}"
@@ -128,9 +134,8 @@ class ConversationContext:
         Returns:
             List of message dictionaries
         """
-        messages = self.messages
-        if limit:
-            messages = messages[-limit:]
+        with self._lock:
+            messages = self.messages[-limit:] if limit else list(self.messages)
 
         return [
             {
@@ -152,21 +157,23 @@ class ConversationContext:
         Returns:
             Pipe-separated context string, or "No previous context." if empty.
         """
-        if not self.messages:
-            return "No previous context."
+        with self._lock:
+            if not self.messages:
+                return "No previous context."
 
-        summary_parts = []
+            summary_parts = []
 
-        # Structured metadata
-        if self.context["last_domain"]:
-            summary_parts.append(f"Domain: {self.context['last_domain']}")
-        if self.context["last_views"]:
-            summary_parts.append(f"Views: {', '.join(self.context['last_views'])}")
-        if self.context["last_result_count"]:
-            summary_parts.append(f"Last result: {self.context['last_result_count']} rows")
+            # Structured metadata
+            if self.context["last_domain"]:
+                summary_parts.append(f"Domain: {self.context['last_domain']}")
+            if self.context["last_views"]:
+                summary_parts.append(f"Views: {', '.join(self.context['last_views'])}")
+            if self.context["last_result_count"]:
+                summary_parts.append(f"Last result: {self.context['last_result_count']} rows")
 
-        # Last two user messages with actual content so the LLM can resolve references
-        recent_user = [m for m in self.messages if m.role == "user"][-2:]
+            # Last two user messages with actual content so the LLM can resolve references
+            recent_user = [m for m in self.messages if m.role == "user"][-2:]
+
         for m in recent_user:
             # Truncate to avoid prompt bloat
             text = m.content[:200]
@@ -187,12 +194,13 @@ class ConversationContext:
             views: Views that were accessed
             result_count: Number of rows returned
         """
-        if domain:
-            self.context["last_domain"] = domain
-        if views:
-            self.context["last_views"] = views
-        if result_count is not None:
-            self.context["last_result_count"] = result_count
+        with self._lock:
+            if domain:
+                self.context["last_domain"] = domain
+            if views:
+                self.context["last_views"] = views
+            if result_count is not None:
+                self.context["last_result_count"] = result_count
 
         logger.debug(
             f"Updated context for conversation {self.conversation_id}"
@@ -205,7 +213,8 @@ class ConversationContext:
             key: Variable name
             value: Variable value
         """
-        self.context["session_variables"][key] = value
+        with self._lock:
+            self.context["session_variables"][key] = value
         logger.debug(f"Set session variable: {key}")
 
     def get_session_variable(self, key: str) -> Optional[Any]:
@@ -217,7 +226,8 @@ class ConversationContext:
         Returns:
             Variable value or None
         """
-        return self.context["session_variables"].get(key)
+        with self._lock:
+            return self.context["session_variables"].get(key)
 
     def is_expired(self) -> bool:
         """Check if conversation has expired.
@@ -234,18 +244,19 @@ class ConversationContext:
         Returns:
             Dictionary representation
         """
-        return {
-            "conversation_id": self.conversation_id,
-            "created_at": self.created_at.isoformat(),
-            "last_accessed": self.last_accessed.isoformat(),
-            "message_count": len(self.messages),
-            "messages": self.get_message_history(),
-            "context": {
-                "last_domain": self.context["last_domain"],
-                "last_views": self.context["last_views"],
-                "last_result_count": self.context["last_result_count"],
+        with self._lock:
+            return {
+                "conversation_id": self.conversation_id,
+                "created_at": self.created_at.isoformat(),
+                "last_accessed": self.last_accessed.isoformat(),
+                "message_count": len(self.messages),
+                "messages": self.get_message_history(),
+                "context": {
+                    "last_domain": self.context["last_domain"],
+                    "last_views": self.context["last_views"],
+                    "last_result_count": self.context["last_result_count"],
+                }
             }
-        }
 
 
 class ConversationManager:
