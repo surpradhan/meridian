@@ -271,10 +271,14 @@ _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 # parentheses, quotes, and semicolons an injection would require.
 _WINDOW_ARG_RE = re.compile(r"^[A-Za-z0-9_,.\s]*$")
 
-# DML/DDL keywords that must never appear in an (otherwise read-only) CTE body.
+# DML/DDL keywords and dangerous SQLite functions that must never appear in an
+# (otherwise read-only) CTE body. NOTE: this is defense-in-depth only — a pure
+# SELECT can still read other tables via UNION/subquery, so CTE SQL must never
+# be sourced from untrusted external input. CTEs are LLM-generated or built in
+# code; the interpret prompt does not request them.
 _CTE_FORBIDDEN_RE = re.compile(
     r"\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|ATTACH|DETACH|PRAGMA|"
-    r"REPLACE|GRANT|REVOKE|TRUNCATE|VACUUM)\b",
+    r"REPLACE|GRANT|REVOKE|TRUNCATE|VACUUM|LOAD_EXTENSION|RANDOMBLOB|ZEROBLOB)\b",
     re.IGNORECASE,
 )
 

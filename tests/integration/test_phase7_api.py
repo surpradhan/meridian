@@ -181,6 +181,45 @@ class TestJobOwnershipAndMasking:
         holder["user"] = admin
         assert client.get(f"/api/jobs/{job_id}").status_code == 200
 
+    def test_poll_denies_domain_owner_cannot_access(self, env):
+        # Owner is an analyst scoped only to 'finance'; the mock result routes to
+        # 'sales'. Polling their own job must 403 on domain access (RBAC is
+        # enforced even though routing happened asynchronously).
+        client, holder = env
+        owner = _make_user(role="analyst", domains=["finance"])
+        owner.id = "user-a"
+        holder["user"] = owner
+        job_id = self._submit_and_wait(client)
+        assert client.get(f"/api/jobs/{job_id}").status_code == 403
+
+    def test_failed_job_error_does_not_leak_exception_text(self):
+        from app.api.routes.jobs import router
+        from app.auth.dependencies import get_current_user
+        from app.jobs.store import JobStore
+
+        # Orchestrator whose process_query raises with sensitive internal text.
+        inst = MagicMock()
+        inst.process_query.side_effect = RuntimeError("postgres://user:pw@internal-db:5432")
+
+        store = JobStore(max_workers=2)
+        user = _make_user(role="analyst")
+        user.id = "user-a"
+
+        mini_app = FastAPI()
+        mini_app.include_router(router)
+        mini_app.dependency_overrides[get_current_user] = lambda: user
+
+        with patch("app.api.routes.jobs.get_job_store", return_value=store), \
+             patch("app.agents.orchestrator.get_shared_or_new_orchestrator", return_value=inst), \
+             patch("app.views.registry.get_registry", return_value=MagicMock()), \
+             patch("app.database.connection.get_db", return_value=MagicMock()):
+            client = TestClient(mini_app)
+            job_id = self._submit_and_wait(client)
+            body = client.get(f"/api/jobs/{job_id}").json()
+
+        assert body["status"] == "failed"
+        assert body["error"] == "Job execution failed"
+        assert "postgres" not in (body["error"] or "")
 
 
 # ---------------------------------------------------------------------------

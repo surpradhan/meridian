@@ -164,8 +164,11 @@ async def stream_query(
 
     return StreamingResponse(
         _stream_query(
+            # Pin execution to the domain we just authorized so process_query
+            # can't independently re-route to a different (possibly denied)
+            # domain after the access check — closing the TOCTOU window.
             question=request.question,
-            domain=request.domain,
+            domain=routed_domain,
             conversation_id=request.conversation_id,
             callback=callback,
             user=current_user,

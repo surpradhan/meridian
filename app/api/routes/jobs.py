@@ -4,13 +4,14 @@ Async Job API Routes
 Submit long-running queries as background jobs and poll for results.
 """
 
+import copy
 import logging
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from app.api.authz import mask_result
+from app.api.authz import enforce_domain_access, mask_result
 from app.auth.dependencies import get_current_user, require_role
 from app.auth.store import User
 from app.jobs.store import JobStatus, get_job_store
@@ -95,10 +96,17 @@ async def get_job_status(
     if record is None or not _owns_job(record, current_user):
         raise HTTPException(status_code=404, detail=f"Job {job_id!r} not found")
     payload = record.to_dict()
-    # The stored result is the orchestrator dict (with its own "result" rows
-    # key); mask sensitive fields for the requesting user's role.
-    if isinstance(payload.get("result"), dict):
-        payload["result"] = mask_result(payload["result"], current_user)
+    result = payload.get("result")
+    if isinstance(result, dict):
+        # The job routes to a domain asynchronously, so enforce domain access
+        # here (raises 403 if the owner isn't permitted into the routed domain),
+        # then mask sensitive fields. Work on a copy so the stored record — which
+        # other roles (e.g. an admin) may later read — is never mutated.
+        enforce_domain_access(result, current_user)
+        payload["result"] = mask_result(copy.deepcopy(result), current_user)
+    # Don't leak internal exception text from a failed job to the client.
+    if payload.get("error"):
+        payload["error"] = "Job execution failed"
     return payload
 
 

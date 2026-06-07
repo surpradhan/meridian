@@ -98,6 +98,41 @@ class TestWindowFunctionHardening:
         wf = WindowFunction(alias="band", function="NTILE", arguments="4")
         assert wf.arguments == "4"
 
+    def test_qualified_arg_from_selected_view_allowed(self, builder):
+        req = QueryRequest(
+            selected_views=["sales_fact"],
+            window_functions=[
+                WindowFunction(alias="lag1", function="LAG", arguments="sales_fact.amount, 1")
+            ],
+        )
+        sql = builder.build_query(req)
+        assert "LAG(sales_fact.amount, 1) OVER" in sql
+
+    def test_arg_referencing_unselected_table_rejected(self, builder):
+        # account_dim.account_number is NOT in the selected views — rejected so
+        # window arguments can't smuggle a column from another table past masking.
+        req = QueryRequest(
+            selected_views=["sales_fact"],
+            window_functions=[
+                WindowFunction(
+                    alias="leak", function="NTH_VALUE",
+                    arguments="account_dim.account_number, 2",
+                )
+            ],
+        )
+        with pytest.raises(ValueError):
+            builder.build_query(req)
+
+    def test_arg_with_unknown_column_rejected(self, builder):
+        req = QueryRequest(
+            selected_views=["sales_fact"],
+            window_functions=[
+                WindowFunction(alias="x", function="LAG", arguments="nonexistent_col, 1")
+            ],
+        )
+        with pytest.raises(ValueError):
+            builder.build_query(req)
+
 
 # ---------------------------------------------------------------------------
 # CTE name / body (C3)
@@ -115,6 +150,10 @@ class TestCTEHardening:
     def test_stacked_statement_cte_rejected(self):
         with pytest.raises(ValidationError):
             CTEDefinition(name="t", sql="SELECT 1; DROP TABLE users")
+
+    def test_load_extension_cte_rejected(self):
+        with pytest.raises(ValidationError):
+            CTEDefinition(name="t", sql="SELECT load_extension('evil.so')")
 
     def test_valid_select_cte_allowed(self):
         cte = CTEDefinition(name="top", sql="SELECT customer_id FROM sales_fact LIMIT 5")

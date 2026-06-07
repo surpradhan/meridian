@@ -199,6 +199,15 @@ class QueryBuilder:
         func = wf.function.upper()
         func_args = wf.arguments or ""
 
+        # Validate each argument token against the selected-view schema so the
+        # arguments string can't smuggle a column from an unselected table
+        # (e.g. ``users.password``) or arbitrary text past the model-level
+        # character allow-list. Validation only — the original string is still
+        # emitted verbatim, preserving legitimate forms like ``view.col, 1``.
+        if func_args:
+            for token in func_args.split(","):
+                self._validate_window_argument_token(token, views)
+
         # Build alias → full-expression map so window ORDER BY can dereference them.
         # e.g. {"SUM_amount": "SUM(sales_fact.amount)"}
         agg_expr_map: dict = {}
@@ -357,6 +366,45 @@ class QueryBuilder:
         raise ValueError(
             f"Unrecognized column identifier {column!r}: not found in any selected "
             "view and not a valid bare identifier."
+        )
+
+    def _column_exists(self, view_name: str, column: str) -> bool:
+        view = self.registry.get_view(view_name)
+        return bool(view and any(c.name.lower() == column.lower() for c in view.columns))
+
+    def _validate_window_argument_token(self, token: str, views: List[str]) -> None:
+        """Validate a single window-function argument token.
+
+        A token must be either a numeric literal or a column reference that
+        resolves to one of the selected views — as ``view.column`` (the view
+        must be selected) or a bare ``column`` present in some selected view.
+        Anything else (an unselected table, an unknown column, or stray text)
+        is rejected so the verbatim arguments string can't reference data
+        outside the query's authorized views.
+        """
+        token = token.strip()
+        if not token:
+            return
+        # Numeric literal (e.g. NTILE(4), LAG(col, 1)).
+        try:
+            float(token)
+            return
+        except ValueError:
+            pass
+        # Qualified view.column — the view must be one of the selected views.
+        if "." in token:
+            parts = token.split(".")
+            if len(parts) == 2 and parts[0] in views and self._column_exists(parts[0], parts[1]):
+                return
+            raise ValueError(
+                f"Window argument {token!r} references an unknown or non-selected column."
+            )
+        # Bare column — must exist in some selected view.
+        if any(self._column_exists(v, token) for v in views):
+            return
+        raise ValueError(
+            f"Window argument {token!r} is not a numeric literal or a known column "
+            "of the selected views."
         )
 
     def _build_where_clause(self, request: QueryRequest) -> Optional[str]:
