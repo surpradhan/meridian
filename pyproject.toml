@@ -63,7 +63,7 @@ observability = [
 ]
 redis = [
     "redis>=5.0.0",
-    "langchain-redis>=0.1.0",
+    "langchain-redis>=0.2.5",
 ]
 prod = [
     "gunicorn>=23.0.0",
