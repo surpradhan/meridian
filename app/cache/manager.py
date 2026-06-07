@@ -124,7 +124,9 @@ class CacheManager:
         else:
             key_data = query
 
-        key_hash = hashlib.md5(key_data.encode()).hexdigest()
+        # MD5 here is a non-cryptographic cache-key digest, not a security
+        # primitive — usedforsecurity=False documents that and satisfies SAST.
+        key_hash = hashlib.md5(key_data.encode(), usedforsecurity=False).hexdigest()
         return f"{self.config.key_prefix}query:{key_hash}"
 
     def get(self, query: str, params: Optional[Dict] = None) -> Optional[List[Dict]]:
