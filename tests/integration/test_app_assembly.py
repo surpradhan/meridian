@@ -27,7 +27,14 @@ def test_root_passes_through_middleware_stack():
 
 
 def test_health_passes_through_middleware_stack():
-    """GET /health must succeed through the assembled middleware stack."""
+    """GET /health must succeed through the assembled middleware stack.
+
+    Note: /health is in _MONITORING_PATHS, so ConcurrentRequestMiddleware
+    short-circuits before touching the semaphore — this is a smoke test of the
+    stack, NOT a regression guard for the limiter bug. test_root_* (where / is
+    a non-monitored path that goes through the semaphore) is what covers the
+    regression.
+    """
     resp = _client().get("/health")
     assert resp.status_code != 503
     assert resp.status_code == 200
