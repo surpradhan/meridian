@@ -24,23 +24,23 @@ classifiers = [
 ]
 requires-python = ">=3.11"
 dependencies = [
-    "fastapi>=0.115.6",
-    "uvicorn[standard]>=0.24.0",
-    "pydantic>=2.5.0",
-    "pydantic-settings>=2.1.0",
+    "fastapi>=0.136.3",
+    "uvicorn[standard]>=0.49.0",
+    "pydantic>=2.13.4",
+    "pydantic-settings>=2.14.1",
     "langchain>=0.1.4",
     "langchain-openai>=0.0.6",
-    "langchain-community>=0.0.10",
+    "langchain-community>=0.4.2",
     "langgraph>=0.1.1",
     "openai>=1.3.0",
     "tenacity>=8.2.3",
-    "sqlalchemy>=2.0.23",
+    "sqlalchemy>=2.0.50",
     "pandas>=2.1.2",
-    "psycopg2-binary>=2.9.9",
+    "psycopg2-binary>=2.9.12",
     "python-dotenv>=1.2.2",
     "python-json-logger>=2.0.7",
     # Auth/security floors kept in sync with requirements.txt
-    "python-jose[cryptography]>=3.4.0",
+    "python-jose[cryptography]>=3.5.0",
     "bcrypt>=4.2.1",
 ]
 
@@ -57,8 +57,8 @@ dev = [
     "ipython>=8.18.0",
 ]
 observability = [
-    "opentelemetry-api>=1.21.0",
-    "opentelemetry-sdk>=1.21.0",
+    "opentelemetry-api>=1.42.1",
+    "opentelemetry-sdk>=1.42.1",
     "opentelemetry-exporter-trace-jaeger>=1.21.0",
 ]
 redis = [
@@ -67,7 +67,7 @@ redis = [
 ]
 prod = [
     "gunicorn>=23.0.0",
-    "prometheus-client>=0.19.0",
+    "prometheus-client>=0.25.0",
 ]
 
 [project.urls]
