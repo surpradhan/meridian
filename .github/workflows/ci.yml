@@ -84,42 +84,20 @@ jobs:
         run: pip install pip-audit==2.7.3 bandit==1.7.9
 
       # Dependency vulnerability audit across base + prod + dev requirements.
-      # BLOCKS on any new advisory ID. The --ignore-vuln list is the set of
-      # advisories deferred to a major-upgrade migration (issue #13: langchain
-      # ecosystem + deep starlette/pyasn1; plus dev-only pytest/black). A new
-      # advisory ID NOT on this list fails the build.
+      # BLOCKS on any new advisory ID. Only two advisories remain deferred after
+      # the langchain/starlette migration (issue #13), each hard-blocked:
+      #   - CVE-2026-30922 (pyasn1): python-jose 3.4.0 pins pyasn1<0.5.0, so it
+      #     can't be bumped without replacing the JWT library.
+      #   - CVE-2025-71176 (pytest): the fix is pytest 9.x, which cascades into
+      #     pytest-asyncio; dev-only, not shipped — deferred.
       # Caveat: pip-audit's --ignore-vuln matches by advisory ID globally, not
-      # per package+version, so a *new* package later tripping an already-listed
-      # ID would also be suppressed. Revisit this list as #13 lands.
+      # per package+version, so a *new* package later tripping a listed ID would
+      # also be suppressed.
       - name: Dependency audit (pip-audit)
         run: |
           pip-audit -r requirements.txt -r requirements-prod.txt -r requirements-dev.txt \
-            --ignore-vuln CVE-2024-7774 \
-            --ignore-vuln CVE-2024-8309 \
-            --ignore-vuln PYSEC-2024-118 \
-            --ignore-vuln CVE-2024-2965 \
-            --ignore-vuln CVE-2024-3095 \
-            --ignore-vuln CVE-2024-5998 \
-            --ignore-vuln CVE-2025-6984 \
-            --ignore-vuln CVE-2024-10940 \
-            --ignore-vuln CVE-2025-65106 \
-            --ignore-vuln CVE-2025-68664 \
-            --ignore-vuln CVE-2026-26013 \
-            --ignore-vuln CVE-2026-40087 \
-            --ignore-vuln CVE-2026-44843 \
-            --ignore-vuln PYSEC-2026-76 \
-            --ignore-vuln CVE-2025-6985 \
-            --ignore-vuln PYSEC-2026-77 \
-            --ignore-vuln PYSEC-2026-83 \
-            --ignore-vuln CVE-2026-41182 \
-            --ignore-vuln CVE-2026-45134 \
             --ignore-vuln CVE-2026-30922 \
-            --ignore-vuln CVE-2025-54121 \
-            --ignore-vuln CVE-2025-62727 \
-            --ignore-vuln PYSEC-2026-161 \
-            --ignore-vuln CVE-2025-71176 \
-            --ignore-vuln PYSEC-2024-48 \
-            --ignore-vuln CVE-2026-32274
+            --ignore-vuln CVE-2025-71176
 
       # Static analysis on application code. Blocks on medium+ severity findings
       # at medium+ confidence (low-confidence/low-severity are reported elsewhere).
