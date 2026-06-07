@@ -1,0 +1,10 @@
+# gitleaks configuration — extends the bundled default ruleset.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Obvious dummy secrets used in auth test fixtures (not real credentials)"
+regexes = [
+  # e.g. test-secret-key-32-bytes-long-xxx, test-secret-for-integration-tests-32b
+  '''test-secret-[a-z0-9-]+''',
+]

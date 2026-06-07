@@ -24,7 +24,7 @@ classifiers = [
 ]
 requires-python = ">=3.11"
 dependencies = [
-    "fastapi>=0.104.0",
+    "fastapi>=0.115.6",
     "uvicorn[standard]>=0.24.0",
     "pydantic>=2.5.0",
     "pydantic-settings>=2.1.0",
@@ -37,8 +37,11 @@ dependencies = [
     "sqlalchemy>=2.0.23",
     "pandas>=2.1.2",
     "psycopg2-binary>=2.9.9",
-    "python-dotenv>=1.0.0",
+    "python-dotenv>=1.2.2",
     "python-json-logger>=2.0.7",
+    # Auth/security floors kept in sync with requirements.txt
+    "python-jose[cryptography]>=3.4.0",
+    "bcrypt>=4.2.1",
 ]
 
 [project.optional-dependencies]
@@ -63,7 +66,7 @@ redis = [
     "langchain-redis>=0.1.0",
 ]
 prod = [
-    "gunicorn>=21.2.0",
+    "gunicorn>=23.0.0",
     "prometheus-client>=0.19.0",
 ]
 

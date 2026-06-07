@@ -29,15 +29,15 @@ jobs:
           - 5432:5432
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
 
       - name: Cache pip packages
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-${{ hashFiles('requirements-dev.txt') }}
@@ -52,6 +52,8 @@ jobs:
       - name: Lint with flake8
         run: |
           flake8 app tests --count --select=E9,F63,F7,F82 --show-source --statistics
+          # Quality pass is non-blocking for now; tightening this gate (and the
+          # mypy gate below) is tracked as a separate cleanup effort.
           flake8 app tests --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
       - name: Type check with mypy
@@ -63,24 +65,92 @@ jobs:
         run: pytest tests/ -v --cov=app --cov-report=xml
 
       - name: Upload coverage
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v4
         with:
           files: ./coverage.xml
           fail_ci_if_error: false
 
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install security tools
+        run: pip install pip-audit==2.7.3 bandit==1.7.9
+
+      # Dependency vulnerability audit across base + prod + dev requirements.
+      # BLOCKS on any new advisory ID. The --ignore-vuln list is the set of
+      # advisories deferred to a major-upgrade migration (issue #13: langchain
+      # ecosystem + deep starlette/pyasn1; plus dev-only pytest/black). A new
+      # advisory ID NOT on this list fails the build.
+      # Caveat: pip-audit's --ignore-vuln matches by advisory ID globally, not
+      # per package+version, so a *new* package later tripping an already-listed
+      # ID would also be suppressed. Revisit this list as #13 lands.
+      - name: Dependency audit (pip-audit)
+        run: |
+          pip-audit -r requirements.txt -r requirements-prod.txt -r requirements-dev.txt \
+            --ignore-vuln CVE-2024-7774 \
+            --ignore-vuln CVE-2024-8309 \
+            --ignore-vuln PYSEC-2024-118 \
+            --ignore-vuln CVE-2024-2965 \
+            --ignore-vuln CVE-2024-3095 \
+            --ignore-vuln CVE-2024-5998 \
+            --ignore-vuln CVE-2025-6984 \
+            --ignore-vuln CVE-2024-10940 \
+            --ignore-vuln CVE-2025-65106 \
+            --ignore-vuln CVE-2025-68664 \
+            --ignore-vuln CVE-2026-26013 \
+            --ignore-vuln CVE-2026-40087 \
+            --ignore-vuln CVE-2026-44843 \
+            --ignore-vuln PYSEC-2026-76 \
+            --ignore-vuln CVE-2025-6985 \
+            --ignore-vuln PYSEC-2026-77 \
+            --ignore-vuln PYSEC-2026-83 \
+            --ignore-vuln CVE-2026-41182 \
+            --ignore-vuln CVE-2026-45134 \
+            --ignore-vuln CVE-2026-30922 \
+            --ignore-vuln CVE-2025-54121 \
+            --ignore-vuln CVE-2025-62727 \
+            --ignore-vuln PYSEC-2026-161 \
+            --ignore-vuln CVE-2025-71176 \
+            --ignore-vuln PYSEC-2024-48 \
+            --ignore-vuln CVE-2026-32274
+
+      # Static analysis on application code. Blocks on medium+ severity findings
+      # at medium+ confidence (low-confidence/low-severity are reported elsewhere).
+      - name: SAST (bandit)
+        run: bandit -r app --severity-level medium --confidence-level medium
+
+      # Secret scan over the full git history (CLI; no license required).
+      # The release tarball's SHA-256 is pinned and verified before extraction
+      # so a tampered/MITM'd asset can't execute an arbitrary binary in CI.
+      - name: Secret scan (gitleaks)
+        run: |
+          GITLEAKS_VERSION=8.18.4
+          GITLEAKS_SHA256=ba6dbb656933921c775ee5a2d1c13a91046e7952e9d919f9bac4cec61d628e7d
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" -o /tmp/gitleaks.tgz
+          echo "${GITLEAKS_SHA256}  /tmp/gitleaks.tgz" | sha256sum -c -
+          tar -xz -C /tmp -f /tmp/gitleaks.tgz gitleaks
+          /tmp/gitleaks detect --source . --config .gitleaks.toml --redact --exit-code 1 --no-banner
+
   build:
-    needs: test
+    needs: [test, security]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@v3
 
       - name: Build Docker image
-        uses: docker/build-push-action@v4
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: docker/Dockerfile
