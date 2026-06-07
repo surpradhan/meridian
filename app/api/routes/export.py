@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
+from app.api.authz import authorize_and_mask
 from app.auth.dependencies import get_current_user
 from app.auth.store import User
 from app.export.exporters import to_csv, to_excel, to_json
@@ -79,10 +80,14 @@ async def export_query(
         )
     except Exception as e:
         logger.error(f"Export query failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Query execution failed")
 
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
+
+    # Enforce domain access and mask sensitive fields before exporting —
+    # otherwise export bypasses the controls applied on /api/query/execute.
+    result = authorize_and_mask(result, current_user)
 
     rows = result.get("result") or []
     fmt = request.format

@@ -8,6 +8,7 @@ These models provide type-safe, validated metadata that agents can use to
 understand the data landscape and construct safe queries.
 """
 
+import re
 from typing import List, Optional, Literal
 from pydantic import BaseModel, Field, validator
 
@@ -254,6 +255,33 @@ _VALID_WINDOW_FUNCTIONS = {
     "NTILE", "CUME_DIST", "PERCENT_RANK",
 }
 
+# Allow-list of aggregation functions accepted in QueryRequest.aggregations.
+# These values are concatenated into SQL by the query builder, so anything
+# outside this set is rejected to prevent SQL-identifier/function injection
+# from LLM-generated query plans.
+_VALID_AGGREGATIONS = {"SUM", "COUNT", "AVG", "MIN", "MAX"}
+
+# A bare SQL identifier: a column/alias name with no embedded SQL syntax.
+# Used to reject injected payloads (spaces, parentheses, quotes, semicolons)
+# in identifier positions that cannot be parameterized.
+_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+# Permitted characters inside a window-function argument string
+# (column names, integer offsets, commas/dots, whitespace). Blocks the
+# parentheses, quotes, and semicolons an injection would require.
+_WINDOW_ARG_RE = re.compile(r"^[A-Za-z0-9_,.\s]*$")
+
+# DML/DDL keywords and dangerous SQLite functions that must never appear in an
+# (otherwise read-only) CTE body. NOTE: this is defense-in-depth only — a pure
+# SELECT can still read other tables via UNION/subquery, so CTE SQL must never
+# be sourced from untrusted external input. CTEs are LLM-generated or built in
+# code; the interpret prompt does not request them.
+_CTE_FORBIDDEN_RE = re.compile(
+    r"\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|ATTACH|DETACH|PRAGMA|"
+    r"REPLACE|GRANT|REVOKE|TRUNCATE|VACUUM|LOAD_EXTENSION|RANDOMBLOB|ZEROBLOB)\b",
+    re.IGNORECASE,
+)
+
 
 class OrderByItem(BaseModel):
     """A single ORDER BY column + direction specification."""
@@ -304,6 +332,28 @@ class WindowFunction(BaseModel):
             )
         return normalised
 
+    @validator("alias")
+    @classmethod
+    def alias_must_be_identifier(cls, v: str) -> str:
+        if not _IDENTIFIER_RE.match(v):
+            raise ValueError(
+                f"Window function alias '{v}' must be a bare identifier "
+                "(letters, digits, underscore; starting with a letter or underscore)."
+            )
+        return v
+
+    @validator("arguments")
+    @classmethod
+    def arguments_must_be_safe(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        if not _WINDOW_ARG_RE.match(v):
+            raise ValueError(
+                f"Window function arguments '{v}' may contain only column names, "
+                "numbers, commas, dots, and whitespace."
+            )
+        return v
+
 
 class CTEDefinition(BaseModel):
     """
@@ -316,6 +366,28 @@ class CTEDefinition(BaseModel):
 
     name: str = Field(..., description="CTE name referenced in the main query")
     sql: str = Field(..., description="SQL body for the CTE (without the name AS ( ) wrapper)")
+
+    @validator("name")
+    @classmethod
+    def name_must_be_identifier(cls, v: str) -> str:
+        if not _IDENTIFIER_RE.match(v):
+            raise ValueError(f"CTE name '{v}' must be a bare identifier.")
+        return v
+
+    @validator("sql")
+    @classmethod
+    def sql_must_be_readonly_select(cls, v: str) -> str:
+        stripped = v.strip().rstrip(";").strip()
+        if ";" in stripped:
+            raise ValueError("CTE SQL may not contain multiple statements.")
+        if not re.match(r"^(SELECT|WITH)\b", stripped, re.IGNORECASE):
+            raise ValueError("CTE SQL must be a read-only SELECT/WITH query.")
+        if _CTE_FORBIDDEN_RE.search(stripped):
+            raise ValueError(
+                "CTE SQL contains a forbidden keyword; only read-only SELECT "
+                "queries are permitted."
+            )
+        return v
 
 
 class QueryRequest(BaseModel):
@@ -388,6 +460,34 @@ class QueryRequest(BaseModel):
         default=None,
         description="Column name to apply the time_expression filter to (e.g. 'date', 'sale_date')",
     )
+
+    @validator("aggregations")
+    @classmethod
+    def aggregations_must_be_valid(cls, v: Optional[dict]) -> Optional[dict]:
+        """Allow-list aggregation functions and normalize them to upper-case.
+
+        Values are concatenated directly into SQL by the query builder, so each
+        must be one of the permitted aggregate functions and each key must be a
+        bare column identifier. Normalizing to upper-case keeps the generated
+        aliases (``SUM_amount``) consistent across SELECT/ORDER BY/HAVING.
+        """
+        if v is None:
+            return v
+        if not isinstance(v, dict):
+            raise ValueError("aggregations must be a mapping of column -> function")
+        normalized: dict = {}
+        for column, func in v.items():
+            if not isinstance(column, str) or not _IDENTIFIER_RE.match(column):
+                raise ValueError(
+                    f"Invalid aggregation column '{column}': must be a bare identifier."
+                )
+            if not isinstance(func, str) or func.strip().upper() not in _VALID_AGGREGATIONS:
+                raise ValueError(
+                    f"Invalid aggregation function '{func}' for column '{column}'. "
+                    f"Must be one of: {', '.join(sorted(_VALID_AGGREGATIONS))}"
+                )
+            normalized[column] = func.strip().upper()
+        return normalized
 
     class Config:
         """Pydantic configuration."""

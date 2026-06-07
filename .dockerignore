@@ -1,0 +1,60 @@
+# Docker build context is the repo root, so this file (not docker/.dockerignore)
+# is what Docker actually honors. Keep secrets, local data, and VCS metadata
+# OUT of the image — `COPY . .` would otherwise bake them in.
+
+# Secrets / environment
+.env
+.env.*
+*.pem
+*.key
+
+# Local data & build artifacts
+*.db
+*.sqlite
+*.sqlite3
+meridian.db
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+dist/
+*.egg-info/
+*.egg
+
+# VCS
+.git
+.gitignore
+.gitattributes
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Docs
+docs/_build/
+site/
