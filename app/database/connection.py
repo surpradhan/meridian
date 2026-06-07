@@ -6,9 +6,14 @@ Supports both real database connections (PostgreSQL/SQLite) and mock connections
 """
 
 import logging
+import re
 from typing import Optional, List, Dict, Any
 from contextlib import contextmanager
 import sqlite3
+
+# A bare SQL identifier (table name). Used to validate names that must be
+# interpolated into PRAGMA/DDL where bind parameters are not permitted.
+_TABLE_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 logger = logging.getLogger(__name__)
 
@@ -182,6 +187,12 @@ class DbConnection:
                 "foreign_keys": [],
             }
 
+        # table_name is interpolated into PRAGMA/SELECT below — SQLite cannot
+        # bind identifiers — so validate it is a bare identifier to prevent
+        # injection before it ever reaches a query string.
+        if not _TABLE_IDENT_RE.match(table_name):
+            raise ValueError(f"Invalid table name: {table_name!r}")
+
         try:
             if not self._connection:
                 raise RuntimeError("Database not connected.")
@@ -189,7 +200,7 @@ class DbConnection:
             cursor = self._connection.cursor()
 
             # Get table info (SQLite-specific, would need to adapt for PostgreSQL)
-            cursor.execute(f"PRAGMA table_info({table_name})")
+            cursor.execute(f"PRAGMA table_info({table_name})")  # nosec B608
             columns_raw = cursor.fetchall()
 
             if not columns_raw:
@@ -208,11 +219,11 @@ class DbConnection:
                 )
 
             # Get row count
-            count_result = self.execute_query(f"SELECT COUNT(*) as count FROM {table_name}")
+            count_result = self.execute_query(f"SELECT COUNT(*) as count FROM {table_name}")  # nosec B608
             row_count = count_result[0]["count"] if count_result else 0
 
             # Get foreign keys (SQLite-specific)
-            cursor.execute(f"PRAGMA foreign_key_list({table_name})")
+            cursor.execute(f"PRAGMA foreign_key_list({table_name})")  # nosec B608
             fk_raw = cursor.fetchall()
 
             foreign_keys = [

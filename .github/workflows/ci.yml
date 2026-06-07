@@ -83,14 +83,17 @@ jobs:
       - name: Install security tools
         run: pip install pip-audit==2.7.3 bandit==1.7.9
 
-      # Dependency vulnerability audit. This BLOCKS on any new vulnerability.
-      # The --ignore-vuln list below is the set of known-unfixable-without-a-
-      # major-upgrade advisories (langchain ecosystem + deep starlette/pyasn1),
-      # deliberately deferred to the dependency-migration effort. Anything NOT
-      # on this list fails the build, so newly introduced vulns are caught.
+      # Dependency vulnerability audit across base + prod + dev requirements.
+      # BLOCKS on any new advisory ID. The --ignore-vuln list is the set of
+      # advisories deferred to a major-upgrade migration (issue #13: langchain
+      # ecosystem + deep starlette/pyasn1; plus dev-only pytest/black). A new
+      # advisory ID NOT on this list fails the build.
+      # Caveat: pip-audit's --ignore-vuln matches by advisory ID globally, not
+      # per package+version, so a *new* package later tripping an already-listed
+      # ID would also be suppressed. Revisit this list as #13 lands.
       - name: Dependency audit (pip-audit)
         run: |
-          pip-audit -r requirements.txt -r requirements-prod.txt \
+          pip-audit -r requirements.txt -r requirements-prod.txt -r requirements-dev.txt \
             --ignore-vuln CVE-2024-7774 \
             --ignore-vuln CVE-2024-8309 \
             --ignore-vuln PYSEC-2024-118 \
@@ -113,7 +116,10 @@ jobs:
             --ignore-vuln CVE-2026-30922 \
             --ignore-vuln CVE-2025-54121 \
             --ignore-vuln CVE-2025-62727 \
-            --ignore-vuln PYSEC-2026-161
+            --ignore-vuln PYSEC-2026-161 \
+            --ignore-vuln CVE-2025-71176 \
+            --ignore-vuln PYSEC-2024-48 \
+            --ignore-vuln CVE-2026-32274
 
       # Static analysis on application code. Blocks on medium+ severity findings
       # at medium+ confidence (low-confidence/low-severity are reported elsewhere).
@@ -121,11 +127,15 @@ jobs:
         run: bandit -r app --severity-level medium --confidence-level medium
 
       # Secret scan over the full git history (CLI; no license required).
+      # The release tarball's SHA-256 is pinned and verified before extraction
+      # so a tampered/MITM'd asset can't execute an arbitrary binary in CI.
       - name: Secret scan (gitleaks)
         run: |
           GITLEAKS_VERSION=8.18.4
-          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
-            | tar -xz -C /tmp gitleaks
+          GITLEAKS_SHA256=ba6dbb656933921c775ee5a2d1c13a91046e7952e9d919f9bac4cec61d628e7d
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" -o /tmp/gitleaks.tgz
+          echo "${GITLEAKS_SHA256}  /tmp/gitleaks.tgz" | sha256sum -c -
+          tar -xz -C /tmp -f /tmp/gitleaks.tgz gitleaks
           /tmp/gitleaks detect --source . --config .gitleaks.toml --redact --exit-code 1 --no-banner
 
   build:

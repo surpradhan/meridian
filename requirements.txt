@@ -2,8 +2,10 @@
 # Extended by requirements-dev.txt and requirements-prod.txt
 
 # Core Framework
-# fastapi 0.115.x clears PYSEC-2024-38 and pulls a starlette (>=0.40) that
-# also clears CVE-2024-47874 / CVE-2025-54121 / PYSEC-2026-161.
+# fastapi 0.115.6 clears PYSEC-2024-38 and pulls starlette 0.41.x, which clears
+# the multipart DoS CVE-2024-47874. NOTE: the deeper starlette advisories
+# (CVE-2025-54121, CVE-2025-62727, PYSEC-2026-161) need starlette >=0.47/1.0 and
+# a coordinated fastapi bump — those are deferred (see issue #13), not cleared.
 fastapi==0.115.6
 uvicorn[standard]==0.24.0
 pydantic==2.5.0
