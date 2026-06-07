@@ -235,6 +235,29 @@ class TestConcurrentRequestMiddleware:
 
         asyncio.run(run())
 
+    def test_passes_through_when_semaphore_free(self):
+        """Regression: a request SUCCEEDS through the middleware when a slot
+        is free. Previously dispatch used asyncio.wait_for(acquire(), timeout=0),
+        which on Python 3.11 raises TimeoutError without attempting the acquire,
+        rejecting every request with 503 even on a completely free semaphore."""
+        from starlette.responses import JSONResponse
+        middleware = self._make_middleware(max_concurrent=2)
+
+        async def ok_next(req):
+            return JSONResponse({"ok": True}, status_code=200)
+
+        async def run():
+            req = MagicMock()
+            req.url.path = "/api/query/execute"
+            req.client.host = "127.0.0.1"
+
+            resp = await middleware.dispatch(req, ok_next)
+            assert resp.status_code == 200
+            # Slot must be released back after the request completes.
+            assert not middleware._semaphore.locked()
+
+        asyncio.run(run())
+
     def test_max_concurrent_stored_on_instance(self):
         middleware = self._make_middleware(max_concurrent=7)
         assert middleware.max_concurrent == 7

@@ -111,10 +111,13 @@ class ConcurrentRequestMiddleware(BaseHTTPMiddleware):
         if self._semaphore is None:
             self._semaphore = asyncio.Semaphore(self.max_concurrent)
 
-        # Single atomic acquire with timeout=0 — avoids the peek-then-acquire race.
-        try:
-            await asyncio.wait_for(self._semaphore.acquire(), timeout=0)
-        except asyncio.TimeoutError:
+        # Non-blocking admission check. We deliberately avoid
+        # asyncio.wait_for(acquire(), timeout=0): on Python 3.11 a zero timeout
+        # raises TimeoutError immediately WITHOUT ever attempting the acquire,
+        # so every request would be rejected even when the semaphore is free.
+        # Peeking at locked() before acquiring accepts a tiny over-admission
+        # race under burst load, which is fine for a soft concurrency limiter.
+        if self._semaphore.locked():
             return JSONResponse(
                 status_code=503,
                 content={
@@ -123,6 +126,7 @@ class ConcurrentRequestMiddleware(BaseHTTPMiddleware):
                 },
                 headers={"Retry-After": "5"},
             )
+        await self._semaphore.acquire()
 
         try:
             return await call_next(request)
