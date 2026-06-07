@@ -19,7 +19,11 @@ pydantic-settings==2.1.0
 # langchain-core / langsmith advisories.
 langchain-openai==1.2.2
 langchain-groq==1.1.2
-langsmith>=0.8.9
+# Pin the core integration transitives so `pip install -r` is reproducible and
+# can't silently resolve a newer langchain-core that shifts its sub-pins.
+langchain-core==1.4.1
+langsmith==0.8.9
+tiktoken==0.13.0
 
 # LLM & Tools
 openai==2.41.0  # required by langchain-openai 1.x; also clears no-longer-pinned old CVEs
