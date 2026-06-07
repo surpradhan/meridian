@@ -10,6 +10,7 @@ Regression tests for the concurrency hardening (review findings H4–H6).
 """
 
 import threading
+import time
 
 import pytest
 
@@ -118,6 +119,11 @@ class TestGetLlmSingleInit:
         sentinel = object()
 
         def fake_init():
+            # Sleep BEFORE incrementing to widen the check-then-act window the
+            # way real (network) client construction does. Without the lock,
+            # multiple threads would enter here concurrently and the count would
+            # exceed 1 — so this test fails closed if the lock is removed.
+            time.sleep(0.05)
             calls["n"] += 1
             llm_client._client = sentinel
             return sentinel

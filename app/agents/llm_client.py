@@ -118,8 +118,12 @@ def get_llm() -> Optional[object]:
     with _init_lock:
         if _init_attempted:
             return _client
+        client = _initialize_client()
+        # Flip the flag only AFTER _client is assigned, so a concurrent caller
+        # on the lock-free fast path above can never observe _init_attempted=True
+        # while _client is still None (torn init).
         _init_attempted = True
-        return _initialize_client()
+        return client
 
 
 def _initialize_client() -> Optional[object]:
@@ -157,5 +161,8 @@ def _initialize_client() -> Optional[object]:
 def reset_llm_client() -> None:
     """Reset the singleton — used in tests to inject a mock client."""
     global _client, _init_attempted
-    _client = None
-    _init_attempted = False
+    # Take the same lock get_llm() uses so a reset can't race a concurrent init
+    # into a torn state.
+    with _init_lock:
+        _client = None
+        _init_attempted = False
