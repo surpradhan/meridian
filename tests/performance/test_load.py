@@ -18,7 +18,7 @@ import asyncio
 import os
 import statistics
 import time
-from typing import Any, Dict, List, Optional
+from typing import Dict, List
 
 import httpx
 import pytest
@@ -143,7 +143,7 @@ async def test_pagination_overhead():
         t_no_page = await _execute_query(client, "Show me all ledger transactions")
 
         t0 = time.monotonic()
-        resp = await client.post(
+        await client.post(
             f"{SERVER_URL}/api/query/execute",
             json={"question": "Show me all ledger transactions", "page": 1, "page_size": 10},
             headers=_headers(),

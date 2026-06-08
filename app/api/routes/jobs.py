@@ -49,7 +49,7 @@ class JobSubmitResponse(BaseModel):
 async def submit_async_query(
     request: AsyncQueryRequest,
     current_user: User = Depends(get_current_user),
-) -> Dict[str, Any]:
+) -> JobSubmitResponse:
     """
     Submit a query as a background job and return immediately.
 

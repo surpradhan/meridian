@@ -248,8 +248,11 @@ class LangraphOrchestrator:
             # Use Langraph if available, otherwise use manual routing
             if self.graph is not None:
                 final_state = self.graph.invoke(initial_state)
-                response = {k: v for k, v in final_state.items()
-                           if not k.startswith("_")}
+                response = {
+                    k: v
+                    for k, v in final_state.items()
+                    if not k.startswith("_")
+                }
             else:
                 # Fallback to manual routing without Langraph
                 domain, confidence = self.router.route(query)

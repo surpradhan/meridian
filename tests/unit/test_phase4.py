@@ -51,7 +51,7 @@ class TestConversationContext:
         assert len(history) == 3
 
     def test_expired_conversation_removed(self):
-        from app.agents.conversation_context import ConversationManager, ConversationContext
+        from app.agents.conversation_context import ConversationManager
         from datetime import datetime, timedelta
 
         mgr = ConversationManager()

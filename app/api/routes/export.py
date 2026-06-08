@@ -5,7 +5,7 @@ Download query results as JSON, CSV, or Excel.
 """
 
 import logging
-from typing import Any, Dict, Literal, Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response

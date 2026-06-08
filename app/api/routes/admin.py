@@ -54,7 +54,7 @@ async def register_domain(
         from fastapi.responses import Response
         import json
         headers = {"X-Reload-Warning": reload_warning}
-        return Response(
+        return Response(  # type: ignore[return-value]
             content=json.dumps(result.model_dump()),
             media_type="application/json",
             headers=headers,
@@ -156,6 +156,9 @@ def _reload_orchestrator() -> Optional[str]:
                 return msg
         return None
     except Exception as e:
-        msg = f"Domain saved, but orchestrator hot-reload raised an unexpected error: {e}. The new domain will be active after next restart."
+        msg = (
+            f"Domain saved, but orchestrator hot-reload raised an unexpected error: {e}. "
+            "The new domain will be active after next restart."
+        )
         logger.error(msg, exc_info=True)
         return msg

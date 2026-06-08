@@ -8,7 +8,7 @@ Unit tests for Phase 5 auth components:
 
 import pytest
 from datetime import datetime, timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 
 # ---------------------------------------------------------------------------
@@ -261,12 +261,12 @@ class TestSemanticAuditActions:
 
     def test_known_routes_get_semantic_names(self):
         from app.api.middleware import _semantic_action
-        assert _semantic_action("POST",   "/api/auth/login")       == "auth.login"
-        assert _semantic_action("POST",   "/api/auth/register")    == "auth.register"
-        assert _semantic_action("GET",    "/api/auth/me")          == "auth.me"
-        assert _semantic_action("POST",   "/api/query/execute")    == "query.execute"
-        assert _semantic_action("GET",    "/api/query/domains")    == "query.domains"
-        assert _semantic_action("GET",    "/api/history")          == "history.list"
+        assert _semantic_action("POST",   "/api/auth/login") == "auth.login"
+        assert _semantic_action("POST",   "/api/auth/register") == "auth.register"
+        assert _semantic_action("GET",    "/api/auth/me") == "auth.me"
+        assert _semantic_action("POST",   "/api/query/execute") == "query.execute"
+        assert _semantic_action("GET",    "/api/query/domains") == "query.domains"
+        assert _semantic_action("GET",    "/api/history") == "history.list"
         assert _semantic_action("DELETE", "/api/history/550e8400-e29b-41d4-a716-446655440000") == "history.delete"
 
     def test_unknown_route_falls_back_gracefully(self):

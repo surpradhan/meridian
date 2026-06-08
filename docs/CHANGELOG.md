@@ -69,7 +69,7 @@
 - Multi-turn conversation context (session-aware, 60-min expiry)
 - Persistent query history (SQLite + REST API at `/api/history`)
 - LLM-generated follow-up suggestions wired as Gradio buttons
-- LangGraph promoted to primary execution engine (direct-agent fallback retained)
+- Direct multi-agent dispatch wired as primary execution path
 - **Tests**: 297+ passing (62 new)
 
 ## v0.3.0 — Phase 3 (roadmap): LLM-Powered NL Understanding (2026-01-xx)
