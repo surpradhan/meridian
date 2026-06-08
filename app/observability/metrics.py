@@ -73,7 +73,7 @@ try:
     PROMETHEUS_AVAILABLE = True
 except ImportError:
     PROMETHEUS_AVAILABLE = False
-    _PROM = None
+    _PROM = None  # type: ignore[assignment]
 
 
 def get_prometheus_registry():
