@@ -6,9 +6,9 @@
 # (CVE-2024-47874, CVE-2025-54121, CVE-2025-62727, PYSEC-2026-161) plus the
 # fastapi PYSEC-2024-38.
 fastapi==0.136.3
-uvicorn[standard]==0.24.0
+uvicorn[standard]==0.49.0
 pydantic==2.13.4  # langchain-core 1.x requires pydantic>=2.7
-pydantic-settings==2.1.0
+pydantic-settings==2.14.1
 
 # Langchain Ecosystem
 # The app only imports langchain_openai (ChatOpenAI) and langchain_groq
@@ -30,9 +30,9 @@ openai==2.41.0  # required by langchain-openai 1.x; also clears no-longer-pinned
 tenacity==9.1.4
 
 # Data & Database
-sqlalchemy==2.0.23
+sqlalchemy==2.0.50
 pandas==2.1.2
-psycopg2-binary==2.9.9
+psycopg2-binary==2.9.12
 
 # HTTP client (used by app and tests)
 httpx==0.28.1  # required by openai 2.x
@@ -44,7 +44,7 @@ python-dotenv==1.2.2  # CVE-2026-28684
 python-json-logger==2.0.7
 
 # Authentication & Security
-python-jose[cryptography]==3.4.0  # PYSEC-2024-232/233, PYSEC-2025-185
+python-jose[cryptography]==3.5.0  # PYSEC-2024-232/233, PYSEC-2025-185
 bcrypt==4.2.1  # pinned (auth-critical; was unbounded >=4.0.0)
 
 # Export (Phase 7)
