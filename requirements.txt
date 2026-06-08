@@ -10,20 +10,15 @@ uvicorn[standard]==0.49.0
 pydantic==2.13.4  # langchain-core 1.x requires pydantic>=2.7
 pydantic-settings==2.14.1
 
-# Langchain Ecosystem
-# The app only imports langchain_openai (ChatOpenAI) and langchain_groq
-# (ChatGroq). langchain / langchain-community / langgraph were never imported
-# (the langgraph path was dead code due to a `langraph` typo) and are removed —
-# this clears their CVEs (issue #13) without a dependency-hell upgrade. The two
-# packages we do use are on the 1.x line, which clears the langchain-openai /
-# langchain-core / langsmith advisories.
+# Langchain / LangGraph Ecosystem
 langchain-openai==1.2.2
 langchain-groq==1.1.2
-# Pin the core integration transitives so `pip install -r` is reproducible and
-# can't silently resolve a newer langchain-core that shifts its sub-pins.
+# Pin the core integration transitives so `pip install -r` is reproducible.
 langchain-core==1.4.1
 langsmith==0.8.9
 tiktoken==0.13.0
+# LangGraph — StateGraph orchestration engine (issue #32: typo fixed, now active)
+langgraph==1.1.3
 
 # LLM & Tools
 openai==2.41.0  # required by langchain-openai 1.x; also clears no-longer-pinned old CVEs

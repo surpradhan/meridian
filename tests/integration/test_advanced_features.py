@@ -348,11 +348,11 @@ class TestIndexOptimization:
 # ============================================================================
 
 class TestLangraphOrchestrator:
-    """Test Langraph-based orchestrator."""
+    """Test the LangGraph-based orchestrator (StateGraph path now active)."""
 
     @pytest.fixture
     def setup_orchestrator(self):
-        """Set up Langraph orchestrator for testing."""
+        """Set up LangGraph orchestrator for testing."""
         reset_db()
         registry = create_test_registry()
         db = DbConnection(is_mock=True)
@@ -360,28 +360,46 @@ class TestLangraphOrchestrator:
         return orchestrator
 
     def test_langraph_orchestrator_initialization(self, setup_orchestrator):
-        """Test Langraph orchestrator initialization."""
+        """LangGraph is now installed — graph must be compiled and non-None."""
+        from app.agents.langraph_orchestrator import LANGGRAPH_AVAILABLE
         orchestrator = setup_orchestrator
         assert orchestrator is not None
-        # Workflow may be None if Langraph not available
         assert orchestrator.router is not None
         assert orchestrator.domain_agents is not None
+        if LANGGRAPH_AVAILABLE:
+            assert orchestrator.graph is not None, "Compiled graph must be present when LangGraph is installed"
 
     def test_langraph_workflow_nodes(self, setup_orchestrator):
-        """Test that workflow has required nodes."""
+        """All expected nodes must exist in the compiled graph."""
+        from app.agents.langraph_orchestrator import LANGGRAPH_AVAILABLE
         orchestrator = setup_orchestrator
-        # Workflow may be None if Langraph not available
-        # This is acceptable - tests fallback routing
-        assert orchestrator.router is not None
+        if not LANGGRAPH_AVAILABLE or orchestrator.graph is None:
+            pytest.skip("LangGraph not available")
+        node_names = set(orchestrator.graph.get_graph().nodes.keys())
+        expected = {"route", "process_agent", "validate", "execute", "complete", "error"}
+        assert expected.issubset(node_names), f"Missing nodes: {expected - node_names}"
 
     def test_langraph_process_query(self, setup_orchestrator):
-        """Test processing query with Langraph."""
+        """process_query returns a dict with domain and result (or error)."""
         orchestrator = setup_orchestrator
         result = orchestrator.process_query("How many sales were made?")
-
-        # Result should have domain and either result or error
         assert "domain" in result
-        assert ("result" in result or "error" in result)
+        assert "result" in result or "error" in result
+
+    def test_langgraph_available_flag(self):
+        """LANGGRAPH_AVAILABLE must be True now that langgraph is installed."""
+        from app.agents.langraph_orchestrator import LANGGRAPH_AVAILABLE, LANGRAPH_AVAILABLE
+        assert LANGGRAPH_AVAILABLE is True
+        assert LANGRAPH_AVAILABLE is True  # backward-compat alias
+
+    def test_get_workflow_graph_returns_ascii(self, setup_orchestrator):
+        """get_workflow_graph() returns a non-empty ASCII diagram."""
+        orchestrator = setup_orchestrator
+        if orchestrator.graph is None:
+            pytest.skip("LangGraph not available")
+        diagram = orchestrator.get_workflow_graph()
+        assert isinstance(diagram, str)
+        assert len(diagram) > 0
 
 
 # ============================================================================

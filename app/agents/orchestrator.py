@@ -52,8 +52,8 @@ class Orchestrator:
     - Conversation context threading (multi-turn refinement)
     - Query history persistence (SQLite)
     - Smart follow-up suggestions (LLM-generated with static fallback)
-    - Direct multi-agent dispatch (LangGraph integration available but inactive;
-      see app/agents/langraph_orchestrator.py and issue #32)
+    - LangGraph StateGraph as primary execution path when langgraph is installed;
+      direct multi-agent dispatch as fallback (see app/agents/langraph_orchestrator.py)
     """
 
     def __init__(self, registry: ViewRegistry, db: DbConnection):
@@ -71,7 +71,9 @@ class Orchestrator:
 
         self.cache = self._get_cache()
         self.conversations: ConversationManager = get_conversation_manager()
-        self._langraph = self._init_langraph(registry, db)
+        # Pass already-constructed router/agents so LangGraph path shares instances;
+        # this keeps test patches on self.router / self.domain_agents effective.
+        self._langraph = self._init_langraph(registry, db, self.router, self.domain_agents)
         self._query_count = 0
 
         # Phase 7: load any previously-registered dynamic domains at startup
@@ -110,15 +112,29 @@ class Orchestrator:
         return CacheManager.get_instance()
 
     @staticmethod
-    def _init_langraph(registry: ViewRegistry, db: DbConnection):
-        """Initialize LangGraph orchestrator when the library is available."""
+    def _init_langraph(
+        registry: ViewRegistry,
+        db: DbConnection,
+        router: Any,
+        domain_agents: Any,
+    ) -> Any:
+        """Initialize LangGraph orchestrator when the library is available.
+
+        Passes the outer orchestrator's already-constructed router and
+        domain-agent instances so both paths share the same objects.  This
+        keeps test patches on self.router / self.domain_agents effective.
+        """
         try:
-            from app.agents.langraph_orchestrator import LangraphOrchestrator, LANGRAPH_AVAILABLE
-            if LANGRAPH_AVAILABLE:
-                lg = LangraphOrchestrator(registry, db)
+            from app.agents.langraph_orchestrator import LangraphOrchestrator, LANGGRAPH_AVAILABLE
+            if LANGGRAPH_AVAILABLE:
+                lg = LangraphOrchestrator(
+                    registry, db,
+                    router=router,
+                    domain_agents=domain_agents,
+                )
                 if lg.graph is not None:
                     logger.info(
-                        "LangGraph orchestrator available — promoted to primary execution engine"
+                        "LangGraph orchestrator initialised — StateGraph is the primary execution engine"
                     )
                     return lg
         except Exception as e:
