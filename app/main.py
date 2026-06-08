@@ -4,6 +4,10 @@ MERIDIAN FastAPI Application Entry Point
 Main application initialization and server setup.
 """
 
+# Imports below are intentionally ordered (env/tracing setup and route
+# registration must follow app creation), so E402 is suppressed file-wide.
+# flake8: noqa: E402
+
 import os
 
 from fastapi import FastAPI

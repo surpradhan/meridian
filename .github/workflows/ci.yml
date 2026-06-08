@@ -51,18 +51,22 @@ jobs:
 
       - name: Lint with flake8
         run: |
+          # Critical syntax errors.
           flake8 app tests --count --select=E9,F63,F7,F82 --show-source --statistics
-          # Quality pass is non-blocking for now; tightening this gate (and the
-          # mypy gate below) is tracked as a separate cleanup effort.
-          flake8 app tests --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+          # Full style/lint gate — BLOCKING. Cyclomatic complexity (C901) is
+          # intentionally not enforced here; it's reported below for visibility.
+          flake8 app tests --count --max-line-length=127 --statistics
+          # Complexity report — non-blocking (refactoring the flagged functions
+          # is tracked separately).
+          flake8 app tests --count --select=C901 --max-complexity=10 --exit-zero --statistics
 
       - name: Type check with mypy
-        run: mypy app --ignore-missing-imports || true
+        run: mypy app --ignore-missing-imports
 
       - name: Run pytest
         env:
           DATABASE_URL: postgresql://meridian:test@localhost:5432/meridian_test
-        run: pytest tests/ -v --cov=app --cov-report=xml
+        run: pytest tests/ -v --cov=app --cov-report=xml --cov-fail-under=75
 
       - name: Upload coverage
         uses: codecov/codecov-action@v4

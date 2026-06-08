@@ -4,7 +4,7 @@ Permission Utilities
 Field masking for sensitive data based on user role.
 """
 
-from typing import Any, Dict, List
+from typing import Any
 
 # Field name substrings that are considered sensitive
 _SENSITIVE_PATTERNS = {

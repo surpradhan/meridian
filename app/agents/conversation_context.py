@@ -69,7 +69,7 @@ class ConversationContext:
         self._lock = threading.RLock()
 
         # Context variables for reference in follow-up queries
-        self.context = {
+        self.context: Dict[str, Any] = {
             "last_domain": None,
             "last_views": [],
             "last_result_count": 0,

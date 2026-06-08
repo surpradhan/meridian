@@ -6,16 +6,14 @@ conversation context, and index optimization.
 """
 
 import pytest
-from typing import List, Dict, Any
 
-from app.observability.tracing import TracingManager, TracingConfig, setup_tracing
-from app.cache.manager import CacheManager, CacheConfig, setup_cache
+from app.observability.tracing import TracingManager, TracingConfig
+from app.cache.manager import CacheManager, CacheConfig
 from app.query.pagination import Paginator, PaginatedResult, StreamingResult
 from app.agents.langraph_orchestrator import LangraphOrchestrator
 from app.agents.conversation_context import (
     ConversationContext,
     ConversationManager,
-    get_conversation_manager,
 )
 from app.database.index_optimizer import IndexOptimizer, QueryAnalyzer
 from app.views.registry import create_test_registry
@@ -395,14 +393,12 @@ class TestFeatureIntegration:
 
     def test_caching_with_pagination(self):
         """Test caching paginated results."""
-        cache = CacheManager(CacheConfig(enabled=False))
         paginator = Paginator()
 
         rows = [{"id": i} for i in range(250)]
         paginated = paginator.paginate(rows, page=1, page_size=100)
 
         # Cache the paginated result
-        cache_key = f"page_1_size_100"
         assert paginated is not None
 
     def test_conversation_with_context_updates(self):

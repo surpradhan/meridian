@@ -9,10 +9,9 @@ import json
 import hashlib
 import logging
 from typing import Any, Optional, Dict, List
-from datetime import timedelta
 
 try:
-    import redis
+    import redis  # type: ignore[import-untyped]
     from redis import Redis
 except ImportError:
     redis = None
@@ -28,23 +27,23 @@ try:
 except ImportError:
     TENACITY_AVAILABLE = False
 
-    def retry(*args, **kwargs):  # type: ignore[misc]
+    def retry(*args, **kwargs):  # type: ignore[no-redef]
         def decorator(func):
             return func
         return decorator
 
-    def stop_after_attempt(n):  # type: ignore[misc]
+    def stop_after_attempt(n):  # type: ignore[no-redef]
         return None
 
-    def wait_exponential(**kwargs):  # type: ignore[misc]
+    def wait_exponential(**kwargs):  # type: ignore[no-redef]
         return None
 
-    def retry_if_exception_type(exc):  # type: ignore[misc]
+    def retry_if_exception_type(exc):  # type: ignore[no-redef]
         return None
 
 logger = logging.getLogger(__name__)
 
-from app.observability.metrics import get_metrics_collector
+from app.observability.metrics import get_metrics_collector  # noqa: E402
 
 
 class CacheConfig:

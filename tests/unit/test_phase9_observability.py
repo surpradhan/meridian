@@ -14,7 +14,7 @@ import pytest
 import time
 
 try:
-    import prometheus_client as prom
+    import prometheus_client as prom  # noqa: F401 (availability probe)
     PROMETHEUS_AVAILABLE = True
 except ImportError:
     PROMETHEUS_AVAILABLE = False
@@ -328,7 +328,6 @@ class TestTracingOTLP:
     def test_no_jaeger_thrift_import(self):
         """The deprecated jaeger-thrift package must not be imported."""
         import sys
-        import importlib
         import app.observability.tracing  # noqa: F401 (ensure loaded)
         thrift_modules = [
             k for k in sys.modules
@@ -349,7 +348,7 @@ class TestTracingOTLP:
         from app.observability.tracing import TracingManager, TracingConfig
         TracingManager._instance = None
         mgr = TracingManager(TracingConfig(enabled=False))
-        with mgr.span("test.span", {"key": "value"}) as span:
+        with mgr.span("test.span", {"key": "value"}):
             pass  # must not raise
         TracingManager._instance = None  # cleanup
 
@@ -368,7 +367,6 @@ class TestObservabilityConfig:
 
     def test_otlp_endpoint_overridable(self, monkeypatch):
         monkeypatch.setenv("OTLP_ENDPOINT", "http://collector:4318/v1/traces")
-        from pydantic_settings import BaseSettings
         # Re-instantiate without cached singleton
         from app.config import Settings
         s = Settings(_env_file=None)

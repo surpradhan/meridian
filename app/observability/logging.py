@@ -8,7 +8,7 @@ Enables JSON logging for better log aggregation in production.
 import logging
 import json
 import sys
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from datetime import datetime
 
 
@@ -52,7 +52,7 @@ class JSONFormatter(logging.Formatter):
 def setup_logging(
     log_level: str = "INFO",
     json_format: bool = True,
-    file_path: str = None,
+    file_path: Optional[str] = None,
 ) -> None:
     """
     Configure logging for the application.
@@ -68,7 +68,7 @@ def setup_logging(
 
     # Create formatter
     if json_format:
-        formatter = JSONFormatter()
+        formatter: logging.Formatter = JSONFormatter()
     else:
         formatter = logging.Formatter(
             "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -116,7 +116,7 @@ class LogContext:
             **fields: Key-value pairs to add to all logs in this context
         """
         self.fields = fields
-        self.handlers = []
+        self.handlers: list = []
 
     def __enter__(self):
         """Enter context and apply fields to all handlers."""
@@ -128,7 +128,7 @@ class LogContext:
                 record.custom_fields = self.fields
                 return old_emit(record)
 
-            handler.emit = emit_with_fields
+            handler.emit = emit_with_fields  # type: ignore[method-assign]
             self.handlers.append((handler, old_emit))
 
         return self

@@ -149,7 +149,7 @@ class MetricsCollector:
         process restarts. Prometheus counters at /metrics are cumulative and
         are NOT affected by reset().
         """
-        summary = {
+        summary: dict = {
             "timestamp": datetime.utcnow().isoformat(),
             "uptime_seconds": (datetime.utcnow() - self.start_time).total_seconds(),
             "note": "Counters are in-memory only; reset() does not affect /metrics Prometheus values.",

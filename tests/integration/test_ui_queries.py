@@ -258,7 +258,7 @@ class TestFinanceQueries:
         if "WHERE" in sql:
             where_part = sql.split("WHERE")[1].split("GROUP BY")[0] if "GROUP BY" in sql else sql.split("WHERE")[1]
             assert "debit_credit" not in where_part, \
-                f"debit_credit WHERE filter should not be present for comparison query"
+                "debit_credit WHERE filter should not be present for comparison query"
 
     def test_debit_and_credit_no_single_filter(self, finance_agent):
         """Fixed behavior: when both debit and credit present, no single-side filter is set."""

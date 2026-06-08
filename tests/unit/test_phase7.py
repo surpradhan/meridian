@@ -10,14 +10,11 @@ Covers:
 - 7.6 IndexOptimizer singleton: get_optimizer, record_query
 """
 
-import asyncio
 import json
-import sqlite3
 import threading
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, List
-from unittest.mock import MagicMock, patch
+from typing import Any, Dict
 
 import pytest
 
@@ -29,7 +26,7 @@ import pytest
 class TestJobStore:
 
     def test_submit_returns_job_id(self):
-        from app.jobs.store import JobStore, JobStatus
+        from app.jobs.store import JobStore
         store = JobStore(max_workers=2)
         job_id = store.submit(lambda: {"done": True})
         assert isinstance(job_id, str)

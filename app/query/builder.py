@@ -12,7 +12,7 @@ This module is responsible for:
 """
 
 import logging
-from typing import List, Set, Dict, Any, Optional, Tuple, Union
+from typing import List, Set, Dict, Any, Optional, Tuple
 from app.views.models import (
     QueryRequest,
     WindowFunction,
@@ -283,15 +283,12 @@ class QueryBuilder:
 
             # Try a direct join from any already-emitted view
             join_rel = None
-            anchor_view = None
             for emitted_view in reversed(list(emitted)):
                 join_rel = self.registry.find_joins(emitted_view, target_view)
                 if join_rel:
-                    anchor_view = emitted_view
                     break
                 join_rel = self.registry.find_joins(target_view, emitted_view)
                 if join_rel:
-                    anchor_view = emitted_view
                     break
 
             if join_rel is not None:
@@ -320,8 +317,10 @@ class QueryBuilder:
                     if step_view in emitted:
                         continue
 
-                    rel = self.registry.find_joins(prev_view, step_view) or \
-                          self.registry.find_joins(step_view, prev_view)
+                    rel = (
+                        self.registry.find_joins(prev_view, step_view)
+                        or self.registry.find_joins(step_view, prev_view)
+                    )
 
                     if rel is None:
                         raise ValueError(

@@ -8,7 +8,7 @@ Implements multiple validation rules to prevent errors and optimize performance.
 import logging
 import sqlite3
 import threading
-from typing import List, Optional, Tuple, Dict, Any
+from typing import List, Optional, Tuple, Any
 from app.views.models import QueryRequest
 from app.views.registry import ViewRegistry
 
@@ -358,7 +358,7 @@ class QueryValidator:
 _validator_instance = None
 
 
-def get_validator(registry: ViewRegistry = None) -> QueryValidator:
+def get_validator(registry: Optional[ViewRegistry] = None) -> QueryValidator:
     """
     Get or create the global query validator.
 
