@@ -29,7 +29,7 @@ jobs:
           - 5432:5432
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -37,7 +37,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Cache pip packages
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-${{ hashFiles('requirements-dev.txt') }}
@@ -51,21 +51,25 @@ jobs:
 
       - name: Lint with flake8
         run: |
+          # Critical syntax errors.
           flake8 app tests --count --select=E9,F63,F7,F82 --show-source --statistics
-          # Quality pass is non-blocking for now; tightening this gate (and the
-          # mypy gate below) is tracked as a separate cleanup effort.
-          flake8 app tests --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+          # Full style/lint gate — BLOCKING. Cyclomatic complexity (C901) is
+          # intentionally not enforced here; it's reported below for visibility.
+          flake8 app tests --count --max-line-length=127 --statistics
+          # Complexity report — non-blocking (refactoring the flagged functions
+          # is tracked separately).
+          flake8 app tests --count --select=C901 --max-complexity=10 --exit-zero --statistics
 
       - name: Type check with mypy
-        run: mypy app --ignore-missing-imports || true
+        run: mypy app --ignore-missing-imports
 
       - name: Run pytest
         env:
           DATABASE_URL: postgresql://meridian:test@localhost:5432/meridian_test
-        run: pytest tests/ -v --cov=app --cov-report=xml
+        run: pytest tests/ -v --cov=app --cov-report=xml --cov-fail-under=75
 
       - name: Upload coverage
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v7
         with:
           files: ./coverage.xml
           fail_ci_if_error: false
@@ -73,7 +77,7 @@ jobs:
   security:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -81,22 +85,20 @@ jobs:
           python-version: '3.11'
 
       - name: Install security tools
-        run: pip install pip-audit==2.7.3 bandit==1.7.9
+        run: pip install pip-audit==2.10.0 bandit==1.9.4
 
       # Dependency vulnerability audit across base + prod + dev requirements.
-      # BLOCKS on any new advisory ID. Only two advisories remain deferred after
-      # the langchain/starlette migration (issue #13), each hard-blocked:
-      #   - CVE-2026-30922 (pyasn1): python-jose 3.4.0 pins pyasn1<0.5.0, so it
-      #     can't be bumped without replacing the JWT library.
-      #   - CVE-2025-71176 (pytest): the fix is pytest 9.x, which cascades into
-      #     pytest-asyncio; dev-only, not shipped — deferred.
+      # BLOCKS on any new advisory ID. One advisory remains deferred:
+      #   - CVE-2025-71176 (pytest 7.x): cleared by pytest 9.x; cascades into
+      #     pytest-asyncio compat work — dev-only, not shipped — deferred.
+      # CVE-2026-30922 (pyasn1 0.4.8) was cleared by python-jose 3.5.0
+      # (which requires pyasn1>=0.5.0), merged in the minor/patch group bump.
       # Caveat: pip-audit's --ignore-vuln matches by advisory ID globally, not
       # per package+version, so a *new* package later tripping a listed ID would
       # also be suppressed.
       - name: Dependency audit (pip-audit)
         run: |
           pip-audit -r requirements.txt -r requirements-prod.txt -r requirements-dev.txt \
-            --ignore-vuln CVE-2026-30922 \
             --ignore-vuln CVE-2025-71176
 
       # Static analysis on application code. Blocks on medium+ severity findings
@@ -122,13 +124,13 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build Docker image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: docker/Dockerfile

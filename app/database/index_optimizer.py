@@ -7,7 +7,7 @@ Tracks slow queries and suggests optimal indexing strategies.
 
 import logging
 import threading
-from typing import Dict, List, Any, Optional, Set
+from typing import Dict, List, Any, Optional
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
@@ -131,8 +131,11 @@ class QueryAnalyzer:
                         existing_indexes.add(index_name)
 
             # Composite index for multi-column access patterns
-            if (len(pattern.columns) > 1 and pattern.frequency > 5 and
-                pattern.avg_execution_time_ms > 100):
+            if (
+                len(pattern.columns) > 1
+                and pattern.frequency > 5
+                and pattern.avg_execution_time_ms > 100
+            ):
 
                 col_str = "_".join(pattern.columns[:3])  # Limit to first 3 columns
                 index_name = f"idx_{pattern.table}_{col_str}"
@@ -167,7 +170,7 @@ class QueryAnalyzer:
             }
 
         # Group by table
-        table_stats = defaultdict(lambda: {"count": 0, "max_time": 0})
+        table_stats: dict = defaultdict(lambda: {"count": 0, "max_time": 0})
         for query in self.slow_queries:
             table = query["table"]
             table_stats[table]["count"] += 1
@@ -237,7 +240,6 @@ class IndexOptimizer:
 
     def __init__(self):
         self.analyzer = QueryAnalyzer()
-
 
     def analyze_workload(self) -> Dict[str, Any]:
         """Analyze current workload and provide recommendations.

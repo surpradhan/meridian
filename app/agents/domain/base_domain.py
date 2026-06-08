@@ -238,7 +238,6 @@ class BaseDomainAgent(ABC):
             - 'row_count': Number of rows returned
             - 'confidence': Confidence score (0-1)
         """
-        pass
 
     def get_available_views(self) -> List[str]:
         """

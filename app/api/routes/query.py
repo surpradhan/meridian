@@ -275,6 +275,7 @@ async def validate_query(
         orchestrator = Orchestrator(registry, db)
 
         # Determine domain
+        domain: str
         if request.auto_route or not request.domain:
             domain, confidence = orchestrator.router.route(request.question)
         else:
