@@ -2,7 +2,7 @@
 Multi-Agent Orchestrator
 
 Coordinates the workflow between router, domain agents, validators, and query builder.
-Phase 4: conversation context, query history, smart suggestions, LangGraph primary.
+Phase 4: conversation context, query history, smart suggestions.
 Phase 7: dynamic domain hot-reload.
 """
 
@@ -52,7 +52,8 @@ class Orchestrator:
     - Conversation context threading (multi-turn refinement)
     - Query history persistence (SQLite)
     - Smart follow-up suggestions (LLM-generated with static fallback)
-    - LangGraph as primary execution engine (with transparent fallback)
+    - Direct multi-agent dispatch (LangGraph integration available but inactive;
+      see app/agents/langraph_orchestrator.py and issue #32)
     """
 
     def __init__(self, registry: ViewRegistry, db: DbConnection):

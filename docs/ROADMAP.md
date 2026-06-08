@@ -25,7 +25,7 @@
 | 1 | Foundation — view registry, 3 agents, QueryBuilder, QueryValidator, REST API (6 endpoints), Gradio UI, Docker | Complete |
 | 2 | Activate scaffolded features — Redis cache, pagination, rate limiting, OpenTelemetry, Langsmith, retry policies | Complete |
 | 3 | LLM-powered NL — GPT-4 routing + interpretation with two-stage regex fallback, confidence-based clarification (threshold 0.4), shared LLM client singleton | Complete |
-| 4 | Conversational intelligence — session-aware context threading, SQLite query history (`/api/history`), LLM follow-up suggestions as interactive Gradio buttons, LangGraph as primary engine | Complete |
+| 4 | Conversational intelligence — session-aware context threading, SQLite query history (`/api/history`), LLM follow-up suggestions as interactive Gradio buttons, direct multi-agent dispatch | Complete |
 | 5 | Enterprise security — JWT auth + RBAC, audit logging, CORS lockdown, API key support | Complete |
 | 6 | Advanced query — HAVING, window functions, CTEs, ORDER BY, full parameterization, multi-hop BFS join pathfinding, time intelligence, visualization hints | Complete |
 | 7 | Scale & polish | Complete |
@@ -75,10 +75,10 @@
 
 | File | Role |
 |------|------|
-| `app/agents/orchestrator.py` | Central query coordinator; wires cache, conversation, LangGraph, history, suggestions |
+| `app/agents/orchestrator.py` | Central query coordinator; wires cache, conversation, direct agent dispatch, history, suggestions |
 | `app/agents/router.py` | Domain routing — LLM-first (GPT-4 JSON), keyword fallback |
 | `app/agents/domain/base_domain.py` | Shared LLM interpret → execute → regex fallback pipeline |
-| `app/agents/langraph_orchestrator.py` | LangGraph graph — primary execution engine |
+| `app/agents/langraph_orchestrator.py` | LangGraph graph — integration prepared, currently inactive (langgraph not installed) |
 | `app/agents/conversation_context.py` | Session state — multi-turn context threading |
 | `app/history/manager.py` | SQLite-backed query history persistence |
 | `app/api/routes/query.py` | Execute, validate, domains, explore endpoints |

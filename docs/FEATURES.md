@@ -7,7 +7,7 @@ Advanced capabilities available in the platform. Most features are configurable 
 1. [Distributed Tracing](#distributed-tracing)
 2. [Query Caching](#query-caching)
 3. [Result Pagination](#result-pagination)
-4. [LangGraph Orchestration](#langgraph-orchestration)
+4. [Orchestration](#orchestration)
 5. [Conversation Context](#conversation-context)
 6. [Index Optimization](#index-optimization)
 7. [Time Intelligence](#time-intelligence)
@@ -126,27 +126,24 @@ PAGINATION_MAX_PAGE_SIZE=10000
 
 ---
 
-## LangGraph Orchestration
+## Orchestration
 
-LangGraph is the **primary execution engine** as of Phase 4. The orchestrator builds a `StateGraph` with nodes for routing, agent processing, validation, and execution. Falls back transparently to a direct agent call on any LangGraph error.
+The `Orchestrator` class in `app/agents/orchestrator.py` is the primary execution engine. It uses direct multi-agent dispatch: the `RouterAgent` classifies the query domain, then the appropriate domain agent (Sales, Finance, or Operations) builds and executes the SQL, and results flow back through caching and conversation context.
 
 ```
-ROUTE → PROCESS_AGENT → VALIDATE → EXECUTE → COMPLETE
-                  ↓                    ↓
-                ERROR               ERROR
+ROUTE → DOMAIN AGENT → VALIDATE → EXECUTE → COMPLETE
+             ↓                        ↓
+           ERROR                    ERROR
 ```
 
 ```python
-from app.agents import LangraphOrchestrator
+from app.agents.orchestrator import get_shared_or_new_orchestrator
 
-orchestrator = LangraphOrchestrator(registry, db)
+orchestrator = get_shared_or_new_orchestrator(registry, db)
 result = orchestrator.process_query("How many sales last quarter?")
-
-# View the compiled graph structure
-print(orchestrator.get_workflow_graph())
 ```
 
-The pre-routed domain is passed in the initial state so LangGraph's route node does not re-classify, preserving the caller's routing decision. Conversation context flows through the graph to the agent processing node.
+A LangGraph integration is prepared in `app/agents/langraph_orchestrator.py` but is currently inactive — the `langgraph` package is not installed and the module is not imported into the main execution path.
 
 ---
 
