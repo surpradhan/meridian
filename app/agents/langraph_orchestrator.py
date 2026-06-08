@@ -1,22 +1,23 @@
 """
-Langraph-based Multi-Agent Orchestrator
+LangGraph-based Multi-Agent Orchestrator
 
-Replaces the state machine pattern with Langraph's workflow engine
-for more robust, scalable multi-agent coordination.
+Provides a StateGraph workflow for multi-agent query coordination:
+
+    route → process_agent → validate → execute → complete
+                   ↓                       ↓
+                 error                   error
+
+The ``LangraphOrchestrator`` is wired as the primary execution engine
+inside ``Orchestrator._init_langraph()``; a direct-agent fallback is used
+when LangGraph is unavailable (see ``process_query()``).
 """
 
 import logging
-from typing import Dict, Any, List, Optional  # noqa: F401 — Optional used in _process_with_agent
+from typing import Any, Dict, List, Optional, TypedDict
 from enum import Enum
 
-try:
-    from langraph.graph import StateGraph, END
-    LANGRAPH_AVAILABLE = True
-except ImportError:
-    LANGRAPH_AVAILABLE = False
-    StateGraph = None
-    END = None
-
+# First-party imports come before the optional third-party try/except so
+# flake8 E402 is not triggered.
 from app.views.registry import ViewRegistry
 from app.database.connection import DbConnection
 from app.query.builder import QueryBuilder
@@ -26,11 +27,24 @@ from app.agents.domain.sales import SalesAgent
 from app.agents.domain.finance import FinanceAgent
 from app.agents.domain.operations import OperationsAgent
 
+try:
+    from langgraph.graph import StateGraph, END
+    LANGGRAPH_AVAILABLE = True
+except ImportError:
+    LANGGRAPH_AVAILABLE = False
+    StateGraph = None  # type: ignore[assignment,misc]
+    END = None  # type: ignore[assignment]
+
+# Backward-compat alias — existing callers that import LANGRAPH_AVAILABLE still
+# work.  Note: patching LANGGRAPH_AVAILABLE after import does NOT update this
+# alias; patch both names if needed in tests.
+LANGRAPH_AVAILABLE = LANGGRAPH_AVAILABLE
+
 logger = logging.getLogger(__name__)
 
 
 class WorkflowState(str, Enum):
-    """States in Langraph workflow."""
+    """Lifecycle states in the LangGraph workflow."""
     INITIAL = "initial"
     ROUTING = "routing"
     AGENT_PROCESSING = "agent_processing"
@@ -40,249 +54,266 @@ class WorkflowState(str, Enum):
     ERROR = "error"
 
 
+class GraphState(TypedDict, total=False):
+    """Typed state dict that flows through the LangGraph StateGraph.
+
+    ``total=False`` because the dict grows incrementally as nodes execute —
+    only ``query`` is guaranteed to be present in the initial state.
+    """
+    # --- Input ---
+    query: str
+    domain: str                        # pre-routed domain (if set by caller)
+    context_summary: Optional[str]     # conversation context injected by Orchestrator
+    conversation_id: str
+
+    # --- Set by _route_query ---
+    routing_confidence: float
+
+    # --- Set by _process_with_agent (mirrors domain-agent result dict) ---
+    result: List[Dict[str, Any]]
+    row_count: int
+    sql: str
+    views: List[str]
+    confidence: float
+    cache_hit: bool
+    suggestions: List[str]
+    interpretation_method: str
+
+    # --- Set by _validate_query ---
+    validation_passed: bool
+
+    # --- Workflow metadata ---
+    state: str       # WorkflowState value
+    error: str       # error message; presence of this key signals failure
+
+
 class LangraphOrchestrator:
     """
-    Langraph-based orchestrator for multi-agent query processing.
+    LangGraph-based orchestrator for multi-agent query processing.
 
-    Uses StateGraph for managing workflow states and transitions,
-    with better support for conditional routing and error handling.
+    Uses ``StateGraph[GraphState]`` for workflow management. The compiled
+    graph is exposed as ``self.graph`` and is invoked by the outer
+    ``Orchestrator`` as the primary execution path when LangGraph is
+    available.
     """
 
     def __init__(
         self,
         registry: ViewRegistry,
         db: DbConnection,
-    ):
-        """Initialize Langraph orchestrator.
+        *,
+        router: Optional[RouterAgent] = None,
+        domain_agents: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Initialise the LangGraph orchestrator.
 
         Args:
-            registry: ViewRegistry instance
-            db: Database connection instance
+            registry: ViewRegistry instance.
+            db: Database connection instance.
+            router: Pre-built RouterAgent to share with the outer Orchestrator
+                (avoids double-instantiation and keeps mocks effective in tests).
+                A new RouterAgent is created if not supplied.
+            domain_agents: Pre-built domain-agent map to share with the outer
+                Orchestrator.  A fresh set is created if not supplied.
         """
         self.registry = registry
         self.db = db
         self.builder = QueryBuilder(registry)
         self.validator = QueryValidator(registry)
-        self.router = RouterAgent(registry)
+        self.router = router or RouterAgent(registry)
 
-        # Initialize domain agents
-        self.domain_agents = {
+        self.domain_agents: Dict[str, Any] = domain_agents or {
             "sales": SalesAgent(registry, db, self.builder),
             "finance": FinanceAgent(registry, db, self.builder),
             "operations": OperationsAgent(registry, db, self.builder),
         }
 
-        # Build Langraph workflow if available
-        self.workflow = None
-        self.graph = None
-        if LANGRAPH_AVAILABLE:
+        self.workflow: Any = None
+        self.graph: Any = None
+        if LANGGRAPH_AVAILABLE:
             self.workflow = self._build_workflow()
             self.graph = self.workflow.compile()
-            logger.debug("LangraphOrchestrator initialized with Langraph workflow")
+            logger.debug("LangraphOrchestrator: LangGraph workflow compiled")
         else:
-            logger.warning("Langraph not available - using simplified workflow")
+            logger.warning("LangGraph not available — LangraphOrchestrator in fallback mode")
 
-    def _build_workflow(self):
-        """Build the Langraph StateGraph workflow.
+    # ------------------------------------------------------------------
+    # Graph construction
+    # ------------------------------------------------------------------
 
-        Returns:
-            Compiled StateGraph
-        """
-        workflow = StateGraph(dict)
+    def _build_workflow(self) -> Any:
+        """Build the LangGraph StateGraph workflow."""
+        workflow: Any = StateGraph(GraphState)
 
-        # Add nodes for each workflow step
-        workflow.add_node("route", self._route_query)
+        workflow.add_node("route",         self._route_query)
         workflow.add_node("process_agent", self._process_with_agent)
-        workflow.add_node("validate", self._validate_query)
-        workflow.add_node("execute", self._execute_query)
-        workflow.add_node("complete", self._complete_query)
-        workflow.add_node("error", self._handle_error)
+        workflow.add_node("validate",      self._validate_query)
+        workflow.add_node("execute",       self._execute_query)
+        workflow.add_node("complete",      self._complete_query)
+        workflow.add_node("error",         self._handle_error)
 
-        # Set entry point
         workflow.set_entry_point("route")
 
-        # Add edges with conditional routing
         workflow.add_edge("route", "process_agent")
-        workflow.add_conditional_edges(
-            "process_agent",
-            self._should_validate,
-            {
-                True: "validate",
-                False: "error",
-            }
-        )
+        # After process_agent: go to validate on success, error on failure.
+        workflow.add_conditional_edges("process_agent", self._should_validate)
         workflow.add_edge("validate", "execute")
-        workflow.add_conditional_edges(
-            "execute",
-            self._should_complete,
-            {
-                True: "complete",
-                False: "error",
-            }
-        )
+        # After execute: go to complete on success, error on failure.
+        workflow.add_conditional_edges("execute", self._should_complete)
         workflow.add_edge("complete", END)
-        workflow.add_edge("error", END)
+        workflow.add_edge("error",   END)
 
         return workflow
 
-    def _route_query(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """Route query to appropriate domain.
+    # ------------------------------------------------------------------
+    # Node implementations
+    # ------------------------------------------------------------------
+
+    def _route_query(self, state: GraphState) -> GraphState:
+        """Route query to the appropriate domain.
 
         If ``domain`` is already set in state (pre-routed by the outer
-        Orchestrator) routing is skipped so we don't discard the caller's
-        domain choice or waste an LLM call.
+        ``Orchestrator``) the LLM routing call is skipped so we don't
+        discard the caller's decision or waste an API call.
         """
         if state.get("domain"):
-            # Domain was pre-set by the caller — honour it.
             state["state"] = WorkflowState.ROUTING.value
             return state
 
         query = state.get("query", "")
-        logger.debug(f"Routing query: {query}")
-
         domain, confidence = self.router.route(query)
         state["domain"] = domain
         state["routing_confidence"] = confidence
         state["state"] = WorkflowState.ROUTING.value
-
-        logger.debug(f"Routed to {domain} with confidence {confidence:.2f}")
+        logger.debug(f"LangGraph routed to {domain!r} (confidence {confidence:.2f})")
         return state
 
-    def _process_with_agent(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """Process query with domain agent, threading conversation context."""
-        domain = state.get("domain")
+    def _process_with_agent(self, state: GraphState) -> GraphState:
+        """Process the query with the appropriate domain agent.
+
+        Threads ``context_summary`` from conversation state into the agent
+        call so multi-turn references resolve correctly.
+        """
+        domain: Optional[str] = state.get("domain")
         query = state.get("query", "")
         context_summary: Optional[str] = state.get("context_summary")
 
-        logger.debug(f"Processing with {domain} agent")
-
-        agent = self.domain_agents.get(domain)
+        agent = self.domain_agents.get(domain or "")
         if not agent:
-            state["error"] = f"Unknown domain: {domain}"
+            state["error"] = f"Unknown domain: {domain!r}"
             return state
 
         try:
-            result = agent.process_query(query, context_summary)
-            state.update(result)
+            result: Dict[str, Any] = agent.process_query(query, context_summary)
+            state.update(result)  # type: ignore[typeddict-item]
             state["state"] = WorkflowState.AGENT_PROCESSING.value
-            return state
-        except Exception as e:
-            logger.error(f"Agent processing failed: {e}")
-            state["error"] = str(e)
-            return state
+        except Exception as exc:
+            logger.error(f"LangGraph agent processing failed: {exc}")
+            state["error"] = str(exc)
 
-    def _should_validate(self, state: Dict[str, Any]) -> bool:
-        """Check if validation should proceed."""
-        return "error" not in state
+        return state
 
-    def _validate_query(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """Validate query structure."""
-        views = state.get("views", [])
-        filters = state.get("filters", {})
-        aggregations = state.get("aggregations", {})
+    def _should_validate(self, state: GraphState) -> str:
+        """Conditional edge: route to 'validate' on success, 'error' on failure."""
+        return "validate" if "error" not in state else "error"
 
-        logger.debug("Validating query")
+    def _validate_query(self, state: GraphState) -> GraphState:
+        """Validate that the agent produced a usable result.
 
-        try:
-            is_valid, errors = self.validator.validate(
-                views=views,
-                filters=filters,
-                aggregations=aggregations,
-            )
+        The domain agent runs its own internal validation before this node
+        executes, so this is a lightweight structural gate: confirm that a
+        SQL query was generated.
+        """
+        if not state.get("sql"):
+            state["error"] = "Agent did not produce a SQL query"
+        else:
+            state["validation_passed"] = True
 
-            if not is_valid:
-                state["error"] = errors
-                logger.warning(f"Validation errors: {errors}")
-            else:
-                state["validation_passed"] = True
+        state["state"] = WorkflowState.VALIDATION.value
+        return state
 
-            state["state"] = WorkflowState.VALIDATION.value
-            return state
+    def _should_complete(self, state: GraphState) -> str:
+        """Conditional edge: route to 'complete' on success, 'error' on failure."""
+        return "complete" if "error" not in state else "error"
 
-        except Exception as e:
-            logger.error(f"Validation failed: {e}")
-            state["error"] = str(e)
-            return state
+    def _execute_query(self, state: GraphState) -> GraphState:
+        """State-advance node — SQL execution already happened in process_agent.
 
-    def _should_complete(self, state: Dict[str, Any]) -> bool:
-        """Check if execution was successful."""
-        return "error" not in state
-
-    def _execute_query(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute the query."""
-        logger.debug("Executing query")
+        ``agent.process_query()`` in ``_process_with_agent`` runs the full
+        interpret → build-SQL → execute pipeline.  This node is intentionally
+        a no-op: it marks the execution stage in the graph diagram and provides
+        a hook for future instrumentation (caching, streaming, row-limit
+        enforcement) without requiring graph topology changes.
+        """
         state["state"] = WorkflowState.EXECUTION.value
-        # Results are populated by domain agent already
         return state
 
-    def _complete_query(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """Mark query as complete."""
-        logger.info("Query completed successfully")
+    def _complete_query(self, state: GraphState) -> GraphState:
+        """Mark the workflow as complete."""
         state["state"] = WorkflowState.COMPLETE.value
+        logger.info("LangGraph query completed successfully")
         return state
 
-    def _handle_error(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle query execution error."""
+    def _handle_error(self, state: GraphState) -> GraphState:
+        """Log and mark the workflow as failed."""
         error = state.get("error", "Unknown error")
-        logger.error(f"Query failed: {error}")
+        logger.error(f"LangGraph query failed: {error}")
         state["state"] = WorkflowState.ERROR.value
         return state
 
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
     def process_query(self, query: str) -> Dict[str, Any]:
-        """Process query through Langraph workflow.
+        """Process a query through the LangGraph workflow (or fallback).
 
         Args:
-            query: Natural language query
+            query: Natural language query string.
 
         Returns:
-            Dict with results and metadata
+            Dict with result rows, SQL, domain, routing metadata, etc.
         """
-        logger.info(f"Processing query: {query}")
-
-        initial_state = {
+        initial_state: GraphState = {
             "query": query,
             "state": WorkflowState.INITIAL.value,
         }
 
         try:
-            # Use Langraph if available, otherwise use manual routing
             if self.graph is not None:
                 final_state = self.graph.invoke(initial_state)
-                response = {
-                    k: v
-                    for k, v in final_state.items()
-                    if not k.startswith("_")
+                # Strip internal LangGraph bookkeeping keys.
+                return {k: v for k, v in final_state.items() if not k.startswith("_")}
+
+            # Fallback: direct dispatch without LangGraph.
+            domain, confidence = self.router.route(query)
+            agent = self.domain_agents.get(domain)
+            if not agent:
+                return {
+                    "error": f"Unknown domain: {domain!r}",
+                    "query": query,
+                    "state": WorkflowState.ERROR.value,
                 }
-            else:
-                # Fallback to manual routing without Langraph
-                domain, confidence = self.router.route(query)
-                agent = self.domain_agents.get(domain)
-                if not agent:
-                    return {
-                        "error": f"Unknown domain: {domain}",
-                        "query": query,
-                        "state": WorkflowState.ERROR.value,
-                    }
-                result = agent.process_query(query)
-                result["domain"] = domain
-                result["routing_confidence"] = confidence
-                result["state"] = WorkflowState.COMPLETE.value
-                response = result
+            result = agent.process_query(query)
+            result["domain"] = domain
+            result["routing_confidence"] = confidence
+            result["state"] = WorkflowState.COMPLETE.value
+            return result
 
-            return response
-
-        except Exception as e:
-            logger.error(f"Workflow execution failed: {e}")
+        except Exception as exc:
+            logger.error(f"LangGraph workflow execution failed: {exc}")
             return {
-                "error": str(e),
+                "error": str(exc),
                 "query": query,
                 "state": WorkflowState.ERROR.value,
             }
 
     def get_workflow_graph(self) -> str:
-        """Get ASCII representation of workflow graph.
+        """Return a Mermaid diagram of the compiled workflow graph.
 
-        Returns:
-            ASCII diagram of the workflow
+        Uses ``draw_mermaid()`` (no extra dependencies) rather than
+        ``draw_ascii()`` which requires the optional *grandalf* package.
         """
-        return self.graph.get_graph().draw_ascii()
+        if self.graph is None:
+            return "LangGraph not available"
+        return self.graph.get_graph().draw_mermaid()
