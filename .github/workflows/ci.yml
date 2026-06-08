@@ -88,18 +88,13 @@ jobs:
         run: pip install pip-audit==2.10.0 bandit==1.9.4
 
       # Dependency vulnerability audit across base + prod + dev requirements.
-      # BLOCKS on any new advisory ID. One advisory remains deferred:
-      #   - CVE-2025-71176 (pytest 7.x): cleared by pytest 9.x; cascades into
-      #     pytest-asyncio compat work — dev-only, not shipped — deferred.
-      # CVE-2026-30922 (pyasn1 0.4.8) was cleared by python-jose 3.5.0
-      # (which requires pyasn1>=0.5.0), merged in the minor/patch group bump.
-      # Caveat: pip-audit's --ignore-vuln matches by advisory ID globally, not
-      # per package+version, so a *new* package later tripping a listed ID would
-      # also be suppressed.
+      # BLOCKS on any new advisory ID. No advisories remain deferred:
+      #   - CVE-2026-30922 (pyasn1 0.4.8): cleared by python-jose 3.5.0
+      #     (which requires pyasn1>=0.5.0; pyasn1 is now at 0.6.3).
+      #   - CVE-2025-71176 (pytest 7.x): cleared by bump to pytest 9.0.3.
       - name: Dependency audit (pip-audit)
         run: |
-          pip-audit -r requirements.txt -r requirements-prod.txt -r requirements-dev.txt \
-            --ignore-vuln CVE-2025-71176
+          pip-audit -r requirements.txt -r requirements-prod.txt -r requirements-dev.txt
 
       # Static analysis on application code. Blocks on medium+ severity findings
       # at medium+ confidence (low-confidence/low-severity are reported elsewhere).
