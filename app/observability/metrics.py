@@ -10,6 +10,12 @@ from typing import Dict, Any
 from datetime import datetime
 import time
 
+# Declared before the try block so mypy sees a stable Any type across both
+# branches: CollectorRegistry when prometheus_client is installed, None otherwise.
+# Using Any avoids a spurious [assignment] error when the library IS present
+# without needing a # type: ignore that becomes unused when it isn't.
+_PROM: Any = None
+
 try:
     import prometheus_client as prom
     _PROM = prom.CollectorRegistry(auto_describe=True)
@@ -73,7 +79,7 @@ try:
     PROMETHEUS_AVAILABLE = True
 except ImportError:
     PROMETHEUS_AVAILABLE = False
-    _PROM = None  # type: ignore[assignment]
+    # _PROM already initialised to None above; no reassignment needed.
 
 
 def get_prometheus_registry():
