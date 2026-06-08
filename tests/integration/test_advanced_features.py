@@ -380,11 +380,16 @@ class TestLangraphOrchestrator:
         assert expected.issubset(node_names), f"Missing nodes: {expected - node_names}"
 
     def test_langraph_process_query(self, setup_orchestrator):
-        """process_query returns a dict with domain and result (or error)."""
+        """process_query traverses the StateGraph and returns a complete result."""
         orchestrator = setup_orchestrator
         result = orchestrator.process_query("How many sales were made?")
         assert "domain" in result
-        assert "result" in result or "error" in result
+        # When the graph runs successfully the state must be "complete", not
+        # "error".  This confirms the graph path ran (not just the fallback).
+        if "error" not in result:
+            assert result.get("state") == "complete", (
+                f"Expected state='complete', got {result.get('state')!r}"
+            )
 
     def test_langgraph_available_flag(self):
         """LANGGRAPH_AVAILABLE must be True now that langgraph is installed."""

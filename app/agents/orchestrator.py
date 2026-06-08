@@ -71,8 +71,12 @@ class Orchestrator:
 
         self.cache = self._get_cache()
         self.conversations: ConversationManager = get_conversation_manager()
-        # Pass already-constructed router/agents so LangGraph path shares instances;
-        # this keeps test patches on self.router / self.domain_agents effective.
+        # Pass already-constructed router/agents so the LangGraph path shares
+        # the same objects as the direct-agent path.  This means:
+        #   (a) test patches on self.router / self.domain_agents affect both paths, and
+        #   (b) reload_domain_agents() mutations are immediately visible to LangGraph.
+        # Both are intentional — reloads propagate automatically without
+        # reinitialising the LangGraph orchestrator.
         self._langraph = self._init_langraph(registry, db, self.router, self.domain_agents)
         self._query_count = 0
 

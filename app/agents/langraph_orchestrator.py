@@ -16,17 +16,8 @@ import logging
 from typing import Any, Dict, List, Optional, TypedDict
 from enum import Enum
 
-try:
-    from langgraph.graph import StateGraph, END
-    LANGGRAPH_AVAILABLE = True
-except ImportError:
-    LANGGRAPH_AVAILABLE = False
-    StateGraph = None  # type: ignore[assignment,misc]
-    END = None  # type: ignore[assignment]
-
-# Backward-compat alias — existing callers that import LANGRAPH_AVAILABLE still work.
-LANGRAPH_AVAILABLE = LANGGRAPH_AVAILABLE
-
+# First-party imports come before the optional third-party try/except so
+# flake8 E402 is not triggered.
 from app.views.registry import ViewRegistry
 from app.database.connection import DbConnection
 from app.query.builder import QueryBuilder
@@ -35,6 +26,19 @@ from app.agents.router import RouterAgent
 from app.agents.domain.sales import SalesAgent
 from app.agents.domain.finance import FinanceAgent
 from app.agents.domain.operations import OperationsAgent
+
+try:
+    from langgraph.graph import StateGraph, END
+    LANGGRAPH_AVAILABLE = True
+except ImportError:
+    LANGGRAPH_AVAILABLE = False
+    StateGraph = None  # type: ignore[assignment,misc]
+    END = None  # type: ignore[assignment]
+
+# Backward-compat alias — existing callers that import LANGRAPH_AVAILABLE still
+# work.  Note: patching LANGGRAPH_AVAILABLE after import does NOT update this
+# alias; patch both names if needed in tests.
+LANGRAPH_AVAILABLE = LANGGRAPH_AVAILABLE
 
 logger = logging.getLogger(__name__)
 
@@ -233,10 +237,13 @@ class LangraphOrchestrator:
         return "complete" if "error" not in state else "error"
 
     def _execute_query(self, state: GraphState) -> GraphState:
-        """Execution node — results are already populated by process_agent.
+        """State-advance node — SQL execution already happened in process_agent.
 
-        This node exists as a named waypoint in the graph so the workflow
-        diagram is self-documenting; no additional work is needed here.
+        ``agent.process_query()`` in ``_process_with_agent`` runs the full
+        interpret → build-SQL → execute pipeline.  This node is intentionally
+        a no-op: it marks the execution stage in the graph diagram and provides
+        a hook for future instrumentation (caching, streaming, row-limit
+        enforcement) without requiring graph topology changes.
         """
         state["state"] = WorkflowState.EXECUTION.value
         return state
