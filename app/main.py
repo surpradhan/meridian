@@ -4,9 +4,10 @@ MERIDIAN FastAPI Application Entry Point
 Main application initialization and server setup.
 """
 
-# Imports below are intentionally ordered (env/tracing setup and route
-# registration must follow app creation), so E402 is suppressed file-wide.
-# flake8: noqa: E402
+# NOTE: some imports below deliberately follow app creation (route modules and
+# the Prometheus mount must be imported after `app` and env/tracing setup), so
+# those specific lines carry a per-line `# noqa: E402`. The rest of the file is
+# still fully linted.
 
 import os
 
@@ -58,19 +59,19 @@ tracing.instrument_app(app)
 # Mount Prometheus /metrics scrape endpoint (gated on METRICS_ENABLED env var).
 # The endpoint is intentionally unauthenticated — standard Prometheus scraper
 # practice. Restrict access at the network layer (firewall / VPC / nginx allow).
-from app.observability.metrics import get_prometheus_registry, PROMETHEUS_AVAILABLE
+from app.observability.metrics import get_prometheus_registry, PROMETHEUS_AVAILABLE  # noqa: E402
 if PROMETHEUS_AVAILABLE and settings.metrics_enabled:
-    from prometheus_client import make_asgi_app as _prom_asgi
+    from prometheus_client import make_asgi_app as _prom_asgi  # noqa: E402
     app.mount("/metrics", _prom_asgi(registry=get_prometheus_registry()))
 
 # Register API routes
-from app.api.routes import query as query_routes
-from app.api.routes import history as history_routes
-from app.api.routes import jobs as jobs_routes
-from app.api.routes import stream as stream_routes
-from app.api.routes import export as export_routes
-from app.api.routes import admin as admin_routes
-from app.auth import routes as auth_routes
+from app.api.routes import query as query_routes  # noqa: E402
+from app.api.routes import history as history_routes  # noqa: E402
+from app.api.routes import jobs as jobs_routes  # noqa: E402
+from app.api.routes import stream as stream_routes  # noqa: E402
+from app.api.routes import export as export_routes  # noqa: E402
+from app.api.routes import admin as admin_routes  # noqa: E402
+from app.auth import routes as auth_routes  # noqa: E402
 
 app.include_router(auth_routes.router)
 app.include_router(query_routes.router)
