@@ -109,8 +109,7 @@ Query + conversation_id?
     ↓ (miss)
 [Router / forced_domain] — domain classification
     ↓
-[LangGraph graph.invoke()] — primary execution
-    ↓ (fallback: direct agent call)
+[Domain Agent dispatch] — direct multi-agent execution
 [HistoryManager.save()] — persist result
     ↓
 [_generate_suggestions()] — 3 LLM follow-ups

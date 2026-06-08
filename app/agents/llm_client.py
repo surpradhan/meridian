@@ -13,7 +13,7 @@ errors), avoiding pointless retries that just add latency.
 
 import logging
 import threading
-from typing import Optional, Tuple, Type
+from typing import Optional, Tuple, Type, Any
 
 logger = logging.getLogger(__name__)
 
@@ -36,24 +36,25 @@ def clear_streaming_llm() -> None:
 # Tenacity retry helpers
 # ---------------------------------------------------------------------------
 
+
 try:
     from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
     TENACITY_AVAILABLE = True
 except ImportError:
     TENACITY_AVAILABLE = False
 
-    def retry(*args, **kwargs):  # type: ignore[misc]
+    def retry(*args, **kwargs):  # type: ignore[no-redef]
         def decorator(func):
             return func
         return decorator
 
-    def stop_after_attempt(n):  # type: ignore[misc]
+    def stop_after_attempt(n):  # type: ignore[no-redef]
         return None
 
-    def wait_exponential(**kwargs):  # type: ignore[misc]
+    def wait_exponential(**kwargs):  # type: ignore[no-redef]
         return None
 
-    def retry_if_exception_type(exc):  # type: ignore[misc]
+    def retry_if_exception_type(exc):  # type: ignore[no-redef]
         return None
 
 # Transient OpenAI/LangChain errors worth retrying.
@@ -90,14 +91,15 @@ def invoke_llm_with_retry(llm, prompt: str):
     Reraises immediately on auth failures, invalid requests, and all other
     non-transient exceptions so callers can fall back without wasted delay.
     """
-    return llm.invoke(prompt)  # type: ignore[union-attr]
+    return llm.invoke(prompt)
 
-_client: Optional[object] = None
+
+_client: Optional[Any] = None
 _init_attempted: bool = False
 _init_lock = threading.Lock()
 
 
-def get_llm() -> Optional[object]:
+def get_llm() -> Optional[Any]:
     """
     Return the shared LLM client, initializing it on first call.
 
@@ -126,7 +128,7 @@ def get_llm() -> Optional[object]:
         return client
 
 
-def _initialize_client() -> Optional[object]:
+def _initialize_client() -> Optional[Any]:
     """Construct the provider client. Caller must hold ``_init_lock``."""
     global _client
     try:
@@ -136,7 +138,7 @@ def _initialize_client() -> Optional[object]:
             from langchain_groq import ChatGroq
             _client = ChatGroq(
                 model=settings.groq_model,
-                api_key=settings.groq_api_key,
+                api_key=settings.groq_api_key,  # type: ignore[arg-type]
                 temperature=0,
                 streaming=True,
             )
@@ -145,7 +147,7 @@ def _initialize_client() -> Optional[object]:
             from langchain_openai import ChatOpenAI
             _client = ChatOpenAI(
                 model=settings.openai_model,
-                api_key=settings.openai_api_key,
+                api_key=settings.openai_api_key,  # type: ignore[arg-type]
                 temperature=0,
                 streaming=True,
             )

@@ -15,7 +15,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 try:
-    import tenacity
+    import tenacity  # noqa: F401 (availability probe)
     TENACITY_AVAILABLE = True
 except ImportError:
     TENACITY_AVAILABLE = False
@@ -121,6 +121,7 @@ class TestRateLimitMiddleware:
 
     def _ok_next(self):
         from starlette.responses import JSONResponse
+
         async def _next(req):
             return JSONResponse({"ok": True})
         return _next
@@ -232,6 +233,76 @@ class TestConcurrentRequestMiddleware:
             assert resp.status_code == 503
 
             middleware._semaphore.release()
+
+        asyncio.run(run())
+
+    def test_passes_through_when_semaphore_free(self):
+        """Regression: a request SUCCEEDS through the middleware when a slot
+        is free. Previously dispatch used asyncio.wait_for(acquire(), timeout=0),
+        which on Python 3.11 raises TimeoutError without attempting the acquire,
+        rejecting every request with 503 even on a completely free semaphore."""
+        from starlette.responses import JSONResponse
+        middleware = self._make_middleware(max_concurrent=2)
+
+        async def ok_next(req):
+            return JSONResponse({"ok": True}, status_code=200)
+
+        async def run():
+            req = MagicMock()
+            req.url.path = "/api/query/execute"
+            req.client.host = "127.0.0.1"
+
+            resp = await middleware.dispatch(req, ok_next)
+            assert resp.status_code == 200
+            # Slot must be released back after the request completes.
+            assert not middleware._semaphore.locked()
+
+        asyncio.run(run())
+
+    def test_admits_up_to_limit_then_rejects_through_real_counting(self):
+        """Regression: admit exactly max_concurrent in-flight requests through
+        the real semaphore counting and reject the next with 503.
+
+        Unlike test_rejects_when_semaphore_exhausted (which pre-drains the
+        semaphore manually), this drives admission entirely through dispatch():
+        two requests are held in-flight by a call_next that blocks on an Event,
+        occupying both real slots, then a third dispatch must be rejected. This
+        locks in the off-by-one (admit N, reject N+1) behavior."""
+        from starlette.responses import JSONResponse
+        middleware = self._make_middleware(max_concurrent=2)
+
+        async def run():
+            release = asyncio.Event()
+            slots_taken = asyncio.Semaphore(0)  # latch: counts in-flight bodies
+
+            async def blocking_next(req):
+                slots_taken.release()      # signal this request acquired a slot
+                await release.wait()       # hold the slot until released
+                return JSONResponse({"ok": True}, status_code=200)
+
+            async def fast_next(req):
+                return JSONResponse({"ok": True}, status_code=200)
+
+            req = MagicMock()
+            req.url.path = "/api/query/execute"
+            req.client.host = "127.0.0.1"
+
+            # Fill both slots with real in-flight requests.
+            t1 = asyncio.create_task(middleware.dispatch(req, blocking_next))
+            t2 = asyncio.create_task(middleware.dispatch(req, blocking_next))
+            await slots_taken.acquire()
+            await slots_taken.acquire()    # both are now holding slots
+            assert middleware._semaphore.locked()
+
+            # Third request must be rejected without blocking.
+            resp = await middleware.dispatch(req, fast_next)
+            assert resp.status_code == 503
+
+            # Release the in-flight requests; they finish 200 and free the slots.
+            release.set()
+            assert (await t1).status_code == 200
+            assert (await t2).status_code == 200
+            assert not middleware._semaphore.locked()
 
         asyncio.run(run())
 

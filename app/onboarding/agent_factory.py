@@ -5,10 +5,8 @@ Builds a DynamicDomainAgent from a DomainConfig so that newly-registered
 domains participate in query routing and execution without code changes.
 """
 
-import json
 import logging
-import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from app.agents.domain.base_domain import BaseDomainAgent
 from app.database.connection import DbConnection

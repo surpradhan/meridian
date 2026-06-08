@@ -6,7 +6,6 @@ touches the Gradio runtime.  This avoids the transitive huggingface_hub
 dependency that can break CI when package versions are mismatched.
 """
 
-import pytest
 import plotly.graph_objects as go
 
 from app.ui.helpers import (

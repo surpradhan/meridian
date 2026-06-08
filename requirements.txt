@@ -2,34 +2,40 @@
 # Extended by requirements-dev.txt and requirements-prod.txt
 
 # Core Framework
-# fastapi 0.115.6 clears PYSEC-2024-38 and pulls starlette 0.41.x, which clears
-# the multipart DoS CVE-2024-47874. NOTE: the deeper starlette advisories
-# (CVE-2025-54121, CVE-2025-62727, PYSEC-2026-161) need starlette >=0.47/1.0 and
-# a coordinated fastapi bump — those are deferred (see issue #13), not cleared.
-fastapi==0.115.6
-uvicorn[standard]==0.24.0
-pydantic==2.5.0
-pydantic-settings==2.1.0
+# fastapi 0.136.x pulls starlette 1.x, clearing every starlette advisory
+# (CVE-2024-47874, CVE-2025-54121, CVE-2025-62727, PYSEC-2026-161) plus the
+# fastapi PYSEC-2024-38.
+fastapi==0.136.3
+uvicorn[standard]==0.49.0
+pydantic==2.13.4  # langchain-core 1.x requires pydantic>=2.7
+pydantic-settings==2.14.1
 
 # Langchain Ecosystem
-langchain==0.2.0
-langchain-openai==0.1.7
-langchain-community==0.2.0
-langchain-groq>=0.1.0
-langgraph==0.1.1
-langsmith==0.1.63
+# The app only imports langchain_openai (ChatOpenAI) and langchain_groq
+# (ChatGroq). langchain / langchain-community / langgraph were never imported
+# (the langgraph path was dead code due to a `langraph` typo) and are removed —
+# this clears their CVEs (issue #13) without a dependency-hell upgrade. The two
+# packages we do use are on the 1.x line, which clears the langchain-openai /
+# langchain-core / langsmith advisories.
+langchain-openai==1.2.2
+langchain-groq==1.1.2
+# Pin the core integration transitives so `pip install -r` is reproducible and
+# can't silently resolve a newer langchain-core that shifts its sub-pins.
+langchain-core==1.4.1
+langsmith==0.8.9
+tiktoken==0.13.0
 
 # LLM & Tools
-openai==1.25.0
-tenacity==8.2.3
+openai==2.41.0  # required by langchain-openai 1.x; also clears no-longer-pinned old CVEs
+tenacity==9.1.4
 
 # Data & Database
-sqlalchemy==2.0.23
+sqlalchemy==2.0.50
 pandas==2.1.2
-psycopg2-binary==2.9.9
+psycopg2-binary==2.9.12
 
 # HTTP client (used by app and tests)
-httpx==0.25.2
+httpx==0.28.1  # required by openai 2.x
 
 # Configuration & Environment
 python-dotenv==1.2.2  # CVE-2026-28684
@@ -38,7 +44,7 @@ python-dotenv==1.2.2  # CVE-2026-28684
 python-json-logger==2.0.7
 
 # Authentication & Security
-python-jose[cryptography]==3.4.0  # PYSEC-2024-232/233, PYSEC-2025-185
+python-jose[cryptography]==3.5.0  # PYSEC-2024-232/233, PYSEC-2025-185
 bcrypt==5.0.0  # pinned (auth-critical; was unbounded >=4.0.0)
 
 # Export (Phase 7)

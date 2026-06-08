@@ -9,12 +9,11 @@ updates:
     labels:
       - "dependencies"
     groups:
-      # Batch the langchain ecosystem so its coordinated major upgrade lands
-      # as one reviewable PR rather than a dozen conflicting ones.
+      # Batch the langchain integration packages so their coordinated bumps land
+      # as one reviewable PR rather than several conflicting ones.
       langchain:
         patterns:
           - "langchain*"
-          - "langgraph"
           - "langsmith"
       # Patch/minor bumps for everything else can ride together.
       minor-and-patch:

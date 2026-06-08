@@ -99,7 +99,7 @@ class ViewSchema(BaseModel):
     )
     columns: List[ColumnSchema] = Field(
         ...,
-        min_items=1,
+        min_length=1,
         description="All columns available in this view",
     )
     row_count: Optional[int] = Field(
@@ -189,12 +189,12 @@ class JoinRelationship(BaseModel):
     )
     source_columns: List[str] = Field(
         ...,
-        min_items=1,
+        min_length=1,
         description="Join columns from source view",
     )
     target_columns: List[str] = Field(
         ...,
-        min_items=1,
+        min_length=1,
         description="Join columns from target view",
     )
     relationship_type: Literal["one_to_one", "one_to_many", "many_to_one", "many_to_many"] = Field(
@@ -219,7 +219,7 @@ class JoinRelationship(BaseModel):
             }
         }
 
-    def validate(self) -> tuple[bool, str]:
+    def validate(self) -> tuple[bool, str]:  # type: ignore[override]
         """
         Validate the join relationship.
 
@@ -412,7 +412,7 @@ class QueryRequest(BaseModel):
 
     selected_views: List[str] = Field(
         ...,
-        min_items=1,
+        min_length=1,
         description="Views to query",
     )
     filters: Optional[dict] = Field(
@@ -508,7 +508,15 @@ class QueryRequest(BaseModel):
                         "order_by": [{"column": "amount", "direction": "DESC"}],
                     }
                 ],
-                "ctes": [{"name": "top_customers", "sql": "SELECT customer_id FROM sales_fact GROUP BY customer_id ORDER BY SUM(amount) DESC LIMIT 5"}],
+                "ctes": [
+                    {
+                        "name": "top_customers",
+                        "sql": (
+                            "SELECT customer_id FROM sales_fact "
+                            "GROUP BY customer_id ORDER BY SUM(amount) DESC LIMIT 5"
+                        ),
+                    }
+                ],
                 "time_expression": "last_quarter",
                 "time_column": "date",
             }

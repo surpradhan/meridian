@@ -9,7 +9,7 @@ import asyncio
 import logging
 import queue
 import threading
-from typing import Any, AsyncGenerator, Dict, Generator, List, Optional, Union
+from typing import Any, AsyncGenerator, Generator, Union
 
 logger = logging.getLogger(__name__)
 
