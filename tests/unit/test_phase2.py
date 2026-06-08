@@ -15,7 +15,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 try:
-    import tenacity
+    import tenacity  # noqa: F401 (availability probe)
     TENACITY_AVAILABLE = True
 except ImportError:
     TENACITY_AVAILABLE = False
@@ -121,6 +121,7 @@ class TestRateLimitMiddleware:
 
     def _ok_next(self):
         from starlette.responses import JSONResponse
+
         async def _next(req):
             return JSONResponse({"ok": True})
         return _next

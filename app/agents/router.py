@@ -155,7 +155,7 @@ class RouterAgent:
         logger.info(
             f"LLM routed query to '{domain}' (confidence={confidence:.2f}): {reasoning}"
         )
-        return domain, confidence  # type: ignore[return-value]
+        return domain, confidence
 
     def _keyword_route(
         self, query: str
@@ -175,7 +175,7 @@ class RouterAgent:
                 if view.replace("_", " ") in query_lower or view in query_lower:
                     scores[domain] += 2
 
-        max_domain = max(scores, key=scores.get)
+        max_domain = max(scores, key=lambda d: scores[d])
         max_score = scores[max_domain]
 
         total_score = sum(scores.values())
@@ -216,6 +216,6 @@ class RouterAgent:
         return {
             "domain": domain,
             "keywords": info["keywords"],
-            "views": [v.name for v in views],
+            "views": [v.name for v in views if v is not None],
             "view_count": len(views),
         }

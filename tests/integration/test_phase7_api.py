@@ -102,7 +102,6 @@ class TestAsyncJobAPI:
         assert resp.status_code == 200
         job_id = resp.json()["job_id"]
 
-        from app.jobs.store import JobStatus
         deadline = time.time() + 5
         status = "pending"
         while time.time() < deadline and status not in ("complete", "failed"):

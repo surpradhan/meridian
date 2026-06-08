@@ -233,7 +233,7 @@ class SalesAgent(BaseDomainAgent):
             "customer": "name",     # resolves to customer_dim.name
             "region": "region",     # resolves to customer_dim.region
             "product": "name",      # resolves to product_dim.name
-            "category": "category", # resolves to product_dim.category
+            "category": "category",  # resolves to product_dim.category
             "date": "date",
         }
 

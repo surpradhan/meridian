@@ -26,6 +26,7 @@ CHART_HEIGHT = 300
 # Chart helpers
 # ---------------------------------------------------------------------------
 
+
 def build_empty_chart(message: str = "No data to visualise") -> go.Figure:
     """Return a styled empty Plotly figure with a centred annotation.
 

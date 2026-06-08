@@ -6,8 +6,7 @@ ensuring they work together correctly to provide metadata access.
 """
 
 import pytest
-from app.views.registry import ViewRegistry, create_test_registry
-from app.views.models import ViewSchema, ColumnSchema, JoinRelationship
+from app.views.registry import create_test_registry
 from app.database.connection import DbConnection, get_db, reset_db
 
 
