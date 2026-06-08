@@ -69,7 +69,7 @@ jobs:
         run: pytest tests/ -v --cov=app --cov-report=xml --cov-fail-under=75
 
       - name: Upload coverage
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v7
         with:
           files: ./coverage.xml
           fail_ci_if_error: false
