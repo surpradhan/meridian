@@ -23,7 +23,7 @@ pip-audit==2.7.3
 bandit==1.7.9
 
 # Development
-ipython==8.18.1
+ipython==9.14.1
 ipdb==0.13.13
 
 # Documentation
