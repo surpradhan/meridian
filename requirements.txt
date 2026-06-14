@@ -15,7 +15,7 @@ langchain-openai==1.2.2
 langchain-groq==1.1.2
 # Pin the core integration transitives so `pip install -r` is reproducible.
 langchain-core==1.4.1
-langsmith==0.8.9
+langsmith==0.8.15
 tiktoken==0.13.0
 # LangGraph — StateGraph orchestration engine (issue #32: typo fixed, now active)
 langgraph==1.1.3
