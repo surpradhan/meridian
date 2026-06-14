@@ -17,5 +17,5 @@ opentelemetry-instrumentation-sqlalchemy==0.63b1
 redis==5.0.1
 
 # Production Server
-gunicorn==23.0.0  # CVE-2024-1135, CVE-2024-6827 (request smuggling)
+gunicorn==26.0.0  # CVE-2024-1135, CVE-2024-6827 (request smuggling)
 prometheus-client==0.25.0

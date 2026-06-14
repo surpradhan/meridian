@@ -65,7 +65,7 @@ redis = [
     "langchain-redis>=0.1.0",
 ]
 prod = [
-    "gunicorn>=23.0.0",
+    "gunicorn>=26.0.0",
     "prometheus-client>=0.25.0",
 ]
 
