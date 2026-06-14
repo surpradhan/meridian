@@ -37,7 +37,7 @@ dependencies = [
     "pandas>=2.1.2",
     "psycopg2-binary>=2.9.12",
     "python-dotenv>=1.2.2",
-    "python-json-logger>=2.0.7",
+    "python-json-logger>=4.1.0",
     # Auth/security floors kept in sync with requirements.txt
     "python-jose[cryptography]>=3.5.0",
     "bcrypt>=5.0.0",

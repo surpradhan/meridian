@@ -36,7 +36,7 @@ httpx==0.28.1  # required by openai 2.x
 python-dotenv==1.2.2  # CVE-2026-28684
 
 # Logging
-python-json-logger==2.0.7
+python-json-logger==4.1.0
 
 # Authentication & Security
 python-jose[cryptography]==3.5.0  # PYSEC-2024-232/233, PYSEC-2025-185
