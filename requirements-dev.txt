@@ -4,7 +4,7 @@
 -r requirements.txt
 
 # UI (development only)
-gradio>=6.16.0
+gradio>=6.18.0
 
 # Testing
 pytest==9.0.3
