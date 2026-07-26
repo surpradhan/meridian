@@ -4,18 +4,18 @@
 -r requirements.txt
 
 # Database Migrations
-alembic==1.18.4
+alembic==1.18.5
 
 # Observability
-opentelemetry-api==1.42.1
-opentelemetry-sdk==1.42.1
-opentelemetry-exporter-otlp==1.42.1
-opentelemetry-instrumentation-fastapi==0.63b1
-opentelemetry-instrumentation-sqlalchemy==0.63b1
+opentelemetry-api==1.44.0
+opentelemetry-sdk==1.44.0
+opentelemetry-exporter-otlp==1.44.0
+opentelemetry-instrumentation-fastapi==0.65b0
+opentelemetry-instrumentation-sqlalchemy==0.65b0
 
 # Caching
 redis==5.0.1
 
 # Production Server
 gunicorn==23.0.0  # CVE-2024-1135, CVE-2024-6827 (request smuggling)
-prometheus-client==0.25.0
+prometheus-client==0.26.0
